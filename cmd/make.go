@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/fanhuadesenlinnn/RepoForge/internal/backend"
+	"github.com/fanhuadesenlinnn/RepoForge/internal/backend/deb"
 	"github.com/fanhuadesenlinnn/RepoForge/internal/backend/rpm"
 	"github.com/fanhuadesenlinnn/RepoForge/internal/config"
 	"github.com/fanhuadesenlinnn/RepoForge/internal/detect"
@@ -81,7 +82,7 @@ func selectBackend(name string, runner executor.Runner) (backend.Backend, error)
 	case "rpm":
 		return rpm.New(runner), nil
 	case "deb":
-		return nil, notImplemented("DEB backend")
+		return deb.New(runner), nil
 	default:
 		return nil, fmt.Errorf("不支持的 backend: %s", name)
 	}

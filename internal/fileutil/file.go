@@ -49,3 +49,27 @@ func WriteFile(path string, data []byte, mode os.FileMode, force bool) error {
 	}
 	return nil
 }
+
+// RemoveAllWithin removes target only when it is a strict child of root.
+func RemoveAllWithin(root, target string) error {
+	cleanRoot, err := filepath.Abs(root)
+	if err != nil {
+		return fmt.Errorf("规范化受管目录 %s 失败: %w", root, err)
+	}
+	cleanTarget, err := filepath.Abs(target)
+	if err != nil {
+		return fmt.Errorf("规范化待清理目录 %s 失败: %w", target, err)
+	}
+	relative, err := filepath.Rel(cleanRoot, cleanTarget)
+	if err != nil {
+		return fmt.Errorf("检查待清理目录 %s 失败: %w", target, err)
+	}
+	if relative == "." || relative == ".." || filepath.IsAbs(relative) || relative == "" ||
+		len(relative) >= 3 && relative[:3] == ".."+string(filepath.Separator) {
+		return fmt.Errorf("拒绝清理受管目录之外的路径: %s", target)
+	}
+	if err := os.RemoveAll(cleanTarget); err != nil {
+		return fmt.Errorf("清理目录 %s 失败: %w", target, err)
+	}
+	return nil
+}

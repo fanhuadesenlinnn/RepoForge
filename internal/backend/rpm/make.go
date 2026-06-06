@@ -3,6 +3,7 @@ package rpm
 import (
 	"context"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/fanhuadesenlinnn/RepoForge/internal/config"
@@ -37,9 +38,11 @@ func (b *Backend) Make(ctx context.Context, cfg *config.Config, profile *config.
 	}
 	args := rpmDownloadArgs(profile, packages)
 	if _, err := b.runner.Run(ctx, executor.Command{
-		Name:    manager,
-		Args:    args,
-		Timeout: 2 * time.Hour,
+		Name:        manager,
+		Args:        args,
+		Timeout:     2 * time.Hour,
+		ProgressOut: os.Stdout,
+		ProgressErr: os.Stderr,
 	}); err != nil {
 		return fmt.Errorf("下载 RPM 软件包及依赖失败: %w", err)
 	}

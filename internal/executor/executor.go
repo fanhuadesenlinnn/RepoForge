@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -18,6 +19,12 @@ type Command struct {
 	Dir     string
 	Env     []string
 	Timeout time.Duration
+
+	// ProgressOut, when non-nil, receives a copy of stdout in real time.
+	// Use this to show download progress etc. while still capturing output.
+	ProgressOut io.Writer
+	// ProgressErr, when non-nil, receives a copy of stderr in real time.
+	ProgressErr io.Writer
 }
 
 // Result captures an external command result.
@@ -76,8 +83,16 @@ func (r *OSRunner) Run(ctx context.Context, command Command) (Result, error) {
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	process.Stdout = &stdout
-	process.Stderr = &stderr
+	if command.ProgressOut != nil {
+		process.Stdout = io.MultiWriter(&stdout, command.ProgressOut)
+	} else {
+		process.Stdout = &stdout
+	}
+	if command.ProgressErr != nil {
+		process.Stderr = io.MultiWriter(&stderr, command.ProgressErr)
+	} else {
+		process.Stderr = &stderr
+	}
 	err := process.Run()
 
 	result := Result{

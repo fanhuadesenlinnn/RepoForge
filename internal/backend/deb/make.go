@@ -42,9 +42,10 @@ func (b *Backend) Make(ctx context.Context, _ *config.Config, profile *config.Pr
 	)
 	args = append(args, packages...)
 	if _, err := b.runner.Run(ctx, executor.Command{
-		Name:    "apt-get",
-		Args:    args,
-		Timeout: 2 * time.Hour,
+		Name:        "apt-get",
+		Args:        args,
+		Timeout:     2 * time.Hour,
+		ProgressErr: os.Stderr,
 	}); err != nil {
 		return fmt.Errorf("下载 DEB 软件包及依赖失败: %w", err)
 	}

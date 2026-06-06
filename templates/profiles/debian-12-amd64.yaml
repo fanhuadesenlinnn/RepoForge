@@ -1,0 +1,46 @@
+schema_version: 1
+
+profile: debian-12-amd64
+backend: deb
+
+target:
+  os: debian
+  version: "12"
+  codename: bookworm
+  arch: amd64
+
+compatibility:
+  require_same_os: true
+  require_same_version: true
+  require_same_arch: true
+  allow_cross_build: false
+
+online:
+  package_manager: apt
+  include_recommends: false
+  include_suggests: false
+  use_apt_root: true
+  apt_root: ${home}/cache/deb/apt-root/debian-12-amd64
+  apt_cache: ${home}/cache/deb/apt-cache/debian-12-amd64
+  apt_state: ${home}/cache/deb/apt-state/debian-12-amd64
+  apt_sources_mode: copy_from_host
+  run_apt_update_before_make: true
+
+repository:
+  profile_dir: ${home}/repos/debian-12-amd64
+  package_dir: ${home}/repos/debian-12-amd64
+  metadata_tool: dpkg-scanpackages
+  trusted: true
+
+local_repo:
+  repo_file: /etc/apt/sources.list.d/repoforge-local.list
+  baseurl: file:${home}/repos/debian-12-amd64
+  suite: ./
+  trusted: true
+  update_after_enable: true
+
+client_repo:
+  output: ${home}/client/repoforge-debian.list
+  baseurl: ${server.public_url}/debian-12-amd64
+  suite: ./
+  trusted: true

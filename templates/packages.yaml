@@ -1,0 +1,36 @@
+schema_version: 1
+
+profiles:
+  kylin-v10-sp3-x86_64:
+    packages:
+      - vim
+      - wget
+      - curl
+      - tar
+      - unzip
+      - net-tools
+      - bind-utils
+      - lsof
+      - rsync
+      - firewalld
+      - audit
+      - aide
+      - sysstat
+      - htop
+      - iotop
+  debian-12-amd64:
+    packages:
+      - vim
+      - wget
+      - curl
+      - tar
+      - unzip
+      - net-tools
+      - dnsutils
+      - lsof
+      - rsync
+      - ufw
+      - auditd
+      - sysstat
+      - htop
+      - iotop

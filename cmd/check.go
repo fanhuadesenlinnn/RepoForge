@@ -10,6 +10,7 @@ import (
 	"github.com/fanhuadesenlinnn/RepoForge/internal/detect"
 	"github.com/fanhuadesenlinnn/RepoForge/internal/executor"
 	"github.com/fanhuadesenlinnn/RepoForge/internal/home"
+	"github.com/fanhuadesenlinnn/RepoForge/internal/server"
 	"github.com/spf13/cobra"
 )
 
@@ -64,7 +65,7 @@ func newCheckCommand() *cobra.Command {
 				}
 				fmt.Fprintf(output, "[OK] profile 匹配: %s\n", profile.Profile)
 				checkCommands(output, runner, profile)
-				checkRepository(output, profile)
+				checkRepository(output, cfg, profile)
 			}
 			return nil
 		},
@@ -90,7 +91,7 @@ func checkCommands(output interface{ Write([]byte) (int, error) }, runner execut
 	}
 }
 
-func checkRepository(output interface{ Write([]byte) (int, error) }, profile *config.ProfileConfig) {
+func checkRepository(output interface{ Write([]byte) (int, error) }, cfg *config.Config, profile *config.ProfileConfig) {
 	index := filepath.Join(profile.Repository.PackageDir, "repodata", "repomd.xml")
 	if profile.Backend == "deb" {
 		index = filepath.Join(profile.Repository.PackageDir, "Packages.gz")
@@ -105,5 +106,9 @@ func checkRepository(output interface{ Write([]byte) (int, error) }, profile *co
 	} else {
 		fmt.Fprintf(output, "[WARN] 本机源未启用: %s\n", profile.LocalRepo.RepoFile)
 	}
-	fmt.Fprintln(output, "[WARN] HTTP 服务检查将在 server 阶段提供")
+	if err := server.CheckProfile(cfg.Server, profile); err != nil {
+		fmt.Fprintf(output, "[WARN] HTTP 服务检查失败: %v\n", err)
+	} else {
+		fmt.Fprintln(output, "[OK] HTTP 软件源可访问")
+	}
 }

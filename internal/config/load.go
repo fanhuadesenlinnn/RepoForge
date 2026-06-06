@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -71,6 +72,25 @@ func LoadProfile(home, name string) (*ProfileConfig, error) {
 	}
 	expandProfile(home, &cfg)
 	return &cfg, nil
+}
+
+// LoadProfiles reads every configured profile in deterministic order.
+func LoadProfiles(home string) ([]*ProfileConfig, error) {
+	matches, err := filepath.Glob(filepath.Join(home, "config", "profiles", "*.yaml"))
+	if err != nil {
+		return nil, fmt.Errorf("查找 profile 配置失败: %w", err)
+	}
+	sort.Strings(matches)
+	profiles := make([]*ProfileConfig, 0, len(matches))
+	for _, path := range matches {
+		name := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+		profile, err := LoadProfile(home, name)
+		if err != nil {
+			return nil, err
+		}
+		profiles = append(profiles, profile)
+	}
+	return profiles, nil
 }
 
 func loadYAML(path string, target any) error {

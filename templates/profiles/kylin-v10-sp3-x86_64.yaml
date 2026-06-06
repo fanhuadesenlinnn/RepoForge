@@ -1,0 +1,51 @@
+schema_version: 1
+
+profile: kylin-v10-sp3-x86_64
+backend: rpm
+
+target:
+  os: kylin
+  version: V10-SP3
+  arch: x86_64
+
+compatibility:
+  require_same_os: true
+  require_same_version: true
+  require_same_arch: true
+  allow_cross_build: false
+
+online:
+  package_manager: auto
+  resolver: installroot
+  releasever: ""
+  enable_repos:
+    - base
+    - updates
+    - extras
+  disable_repos:
+    - "*"
+  include_weak_deps: false
+  use_installroot: true
+  installroot: ${home}/cache/rpm/installroot/kylin-v10-sp3-x86_64
+  clean_installroot_before_make: true
+
+repository:
+  profile_dir: ${home}/repos/kylin-v10-sp3-x86_64
+  package_dir: ${home}/repos/kylin-v10-sp3-x86_64
+  metadata_tool: createrepo_c
+  createrepo_update: true
+  gpgcheck: false
+
+local_repo:
+  repo_id: repoforge-local
+  repo_name: RepoForge Local RPM Repo
+  repo_file: /etc/yum.repos.d/repoforge-local.repo
+  baseurl: file://${home}/repos/kylin-v10-sp3-x86_64
+  makecache_after_enable: true
+
+client_repo:
+  repo_id: repoforge-lan
+  repo_name: RepoForge LAN RPM Repo
+  output: ${home}/client/repoforge-kylin.repo
+  baseurl: ${server.public_url}/kylin-v10-sp3-x86_64
+  gpgcheck: false

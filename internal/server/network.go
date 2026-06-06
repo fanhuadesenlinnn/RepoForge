@@ -13,8 +13,12 @@ import (
 // ResolvePublicURL returns the configured or detected LAN URL and all IP candidates.
 func ResolvePublicURL(cfg config.ServerConfig) (string, []string, error) {
 	if cfg.PublicURL != "" && cfg.PublicURL != "auto" {
-		if _, err := url.ParseRequestURI(cfg.PublicURL); err != nil {
+		parsed, err := url.ParseRequestURI(cfg.PublicURL)
+		if err != nil {
 			return "", nil, fmt.Errorf("server.public_url 无效: %w", err)
+		}
+		if (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+			return "", nil, fmt.Errorf("server.public_url 必须包含 http/https 协议和主机名")
 		}
 		return strings.TrimRight(cfg.PublicURL, "/"), nil, nil
 	}

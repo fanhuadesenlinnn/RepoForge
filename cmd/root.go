@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 
+	"github.com/fanhuadesenlinnn/RepoForge/internal/version"
 	"github.com/spf13/cobra"
 )
 
@@ -21,10 +22,12 @@ func newRootCommand() *cobra.Command {
 		Use:           "repoforge",
 		Short:         "Linux 离线软件源构建与分发工具",
 		Long:          longDescription,
+		Version:       version.String(),
 		SilenceErrors: true,
 		SilenceUsage:  true,
 	}
 	root.CompletionOptions.DisableDefaultCmd = true
+	root.SetVersionTemplate("RepoForge {{.Version}}\n")
 
 	root.AddCommand(
 		newInitCommand(),
@@ -41,6 +44,9 @@ func Execute() error {
 	return newRootCommand().Execute()
 }
 
-func notImplemented(name string) error {
-	return fmt.Errorf("%s 命令将在后续实现阶段提供", name)
+func noArgs(command *cobra.Command, args []string) error {
+	if len(args) == 0 {
+		return nil
+	}
+	return fmt.Errorf("%s 不接受位置参数：%v", command.CommandPath(), args)
 }

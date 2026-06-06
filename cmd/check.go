@@ -19,6 +19,7 @@ func newCheckCommand() *cobra.Command {
 	command := &cobra.Command{
 		Use:   "check",
 		Short: "检查环境和仓库状态",
+		Args:  noArgs,
 		RunE: func(command *cobra.Command, _ []string) error {
 			homeDir, err := home.Detect(false)
 			if err != nil {
@@ -64,8 +65,11 @@ func newCheckCommand() *cobra.Command {
 					return err
 				}
 				fmt.Fprintf(output, "[OK] profile 匹配: %s\n", profile.Profile)
-				checkCommands(output, runner, profile)
+				commandsOK := checkCommands(output, runner, profile)
 				checkRepository(output, cfg, profile)
+				if !commandsOK {
+					return fmt.Errorf("检查发现缺失的依赖命令，请按上方提示安装后重试")
+				}
 			}
 			return nil
 		},
@@ -74,7 +78,8 @@ func newCheckCommand() *cobra.Command {
 	return command
 }
 
-func checkCommands(output interface{ Write([]byte) (int, error) }, runner executor.Runner, profile *config.ProfileConfig) {
+func checkCommands(output interface{ Write([]byte) (int, error) }, runner executor.Runner, profile *config.ProfileConfig) bool {
+	ok := true
 	var groups [][]string
 	if profile.Backend == "rpm" {
 		groups = [][]string{{"dnf", "yum"}, {"rpm"}, {profile.Repository.MetadataTool}}
@@ -85,10 +90,12 @@ func checkCommands(output interface{ Write([]byte) (int, error) }, runner execut
 		name, err := detect.FindAny(runner, group...)
 		if err != nil {
 			fmt.Fprintf(output, "[ERROR] 未找到命令: %v\n", group)
+			ok = false
 			continue
 		}
 		fmt.Fprintf(output, "[OK] 命令可用: %s\n", name)
 	}
+	return ok
 }
 
 func checkRepository(output interface{ Write([]byte) (int, error) }, cfg *config.Config, profile *config.ProfileConfig) {

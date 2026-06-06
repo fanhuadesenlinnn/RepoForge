@@ -62,6 +62,19 @@ func TestHandlerRejectsSymlinkOutsideRoot(t *testing.T) {
 	}
 }
 
+func TestResolveConfiguredPublicURL(t *testing.T) {
+	got, candidates, err := ResolvePublicURL(config.ServerConfig{PublicURL: "http://192.0.2.10:8080/"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "http://192.0.2.10:8080" || candidates != nil {
+		t.Fatalf("ResolvePublicURL() = %q, %v", got, candidates)
+	}
+	if _, _, err := ResolvePublicURL(config.ServerConfig{PublicURL: "not-a-url"}); err == nil {
+		t.Fatal("ResolvePublicURL accepted invalid URL")
+	}
+}
+
 type fakeRunner struct {
 	commands []executor.Command
 }

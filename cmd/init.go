@@ -13,6 +13,7 @@ func newInitCommand() *cobra.Command {
 	command := &cobra.Command{
 		Use:   "init",
 		Short: "初始化 RepoForge 目录",
+		Args:  noArgs,
 		RunE: func(command *cobra.Command, _ []string) error {
 			homeDir, err := home.Detect(true)
 			if err != nil {

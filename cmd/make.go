@@ -19,7 +19,11 @@ func newMakeCommand() *cobra.Command {
 	command := &cobra.Command{
 		Use:   "make",
 		Short: "制作离线软件源",
+		Args:  noArgs,
 		RunE: func(command *cobra.Command, _ []string) error {
+			if profileName == "" {
+				return fmt.Errorf("必须使用 --profile 指定要制作的 profile")
+			}
 			homeDir, cfg, profile, packages, runner, err := loadMakeInputs(command.Context(), profileName)
 			if err != nil {
 				return err
@@ -45,7 +49,6 @@ backend: %s
 		},
 	}
 	command.Flags().StringVar(&profileName, "profile", "", "要制作的 profile 名称")
-	_ = command.MarkFlagRequired("profile")
 	return command
 }
 

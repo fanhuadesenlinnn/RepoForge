@@ -34,6 +34,7 @@ func newServerStartCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "start",
 		Short: "前台启动 HTTP 服务",
+		Args:  noArgs,
 		RunE: func(command *cobra.Command, _ []string) error {
 			_, cfg, err := loadServerConfig()
 			if err != nil {
@@ -51,6 +52,7 @@ func newServerEnableCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "enable",
 		Short: "安装并启用 systemd 服务",
+		Args:  noArgs,
 		RunE: func(command *cobra.Command, _ []string) error {
 			if err := privilege.RequireRoot("server enable 需要写入 systemd 服务目录", "sudo repoforge server enable"); err != nil {
 				return err
@@ -91,6 +93,7 @@ func newServerStopCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "stop",
 		Short: "停止 systemd 服务",
+		Args:  noArgs,
 		RunE: func(command *cobra.Command, _ []string) error {
 			if err := privilege.RequireRoot("server stop 需要管理 systemd 服务", "sudo repoforge server stop"); err != nil {
 				return err
@@ -112,6 +115,7 @@ func newServerDisableCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "disable",
 		Short: "禁用并删除 systemd 服务",
+		Args:  noArgs,
 		RunE: func(command *cobra.Command, _ []string) error {
 			if err := privilege.RequireRoot("server disable 需要管理 systemd 服务", "sudo repoforge server disable"); err != nil {
 				return err
@@ -133,6 +137,7 @@ func newServerStatusCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "status",
 		Short: "查看 HTTP 服务状态",
+		Args:  noArgs,
 		RunE: func(command *cobra.Command, _ []string) error {
 			homeDir, cfg, err := loadServerConfig()
 			if err != nil {

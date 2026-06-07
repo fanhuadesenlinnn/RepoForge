@@ -5,24 +5,50 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
+	"github.com/fanhuadesenlinnn/RepoForge/internal/backend"
 	"github.com/fanhuadesenlinnn/RepoForge/internal/config"
 	"github.com/fanhuadesenlinnn/RepoForge/internal/executor"
 	"github.com/fanhuadesenlinnn/RepoForge/internal/fileutil"
 )
 
 // Make downloads DEB packages and regenerates Packages indexes.
-func (b *Backend) Make(ctx context.Context, _ *config.Config, profile *config.ProfileConfig, packages []string) error {
+func (b *Backend) Make(ctx context.Context, cfg *config.Config, profile *config.ProfileConfig, packages []string) error {
 	if err := b.Check(ctx, profile); err != nil {
 		return err
 	}
-	if len(packages) == 0 {
-		return fmt.Errorf("profile %q 的软件包列表为空", profile.Profile)
+
+	// Collect input package files from configured package_dirs.
+	inputPkgs, err := backend.CollectPackageFiles(profile.Input.PackageDirs, ".deb", profile.Input.Recursive)
+	if err != nil {
+		return err
 	}
+
+	// Require at least one source of packages.
+	if len(packages) == 0 && len(inputPkgs) == 0 {
+		return fmt.Errorf("profile %q 没有配置软件包，也没有找到输入 DEB 文件", profile.Profile)
+	}
+
 	if err := prepareAPT(profile); err != nil {
 		return err
 	}
+
+	// Copy input packages into the repository package directory.
+	if _, err := backend.CopyPackagesToRepo(inputPkgs, profile.Repository.PackageDir); err != nil {
+		return err
+	}
+
+	// Extract package names from input .deb files.
+	debNames, err := debPackageNames(ctx, b.runner, inputPkgs)
+	if err != nil {
+		return err
+	}
+
+	// Merge configured packages and input .deb package names.
+	allPackages := append([]string{}, packages...)
+	allPackages = append(allPackages, debNames...)
 
 	options := aptOptions(profile)
 	if profile.Online.RunAPTUpdateBeforeMake {
@@ -40,7 +66,7 @@ func (b *Backend) Make(ctx context.Context, _ *config.Config, profile *config.Pr
 		"-o", fmt.Sprintf("APT::Install-Recommends=%t", profile.Online.IncludeRecommends),
 		"-o", fmt.Sprintf("APT::Install-Suggests=%t", profile.Online.IncludeSuggests),
 	)
-	args = append(args, packages...)
+	args = append(args, allPackages...)
 	if _, err := b.runner.Run(ctx, executor.Command{
 		Name:        "apt-get",
 		Args:        args,
@@ -80,6 +106,35 @@ func (b *Backend) Make(ctx context.Context, _ *config.Config, profile *config.Pr
 		return err
 	}
 	return b.VerifyRepo(profile)
+}
+
+// debPackageNames extracts Debian package names from .deb files using dpkg-deb.
+func debPackageNames(ctx context.Context, runner executor.Runner, files []string) ([]string, error) {
+	if len(files) == 0 {
+		return nil, nil
+	}
+	var names []string
+	seen := make(map[string]struct{})
+	for _, f := range files {
+		result, err := runner.Run(ctx, executor.Command{
+			Name:    "dpkg-deb",
+			Args:    []string{"-f", f, "Package"},
+			Timeout: 30 * time.Second,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("提取 DEB 包名失败 %s: %w", f, err)
+		}
+		name := strings.TrimSpace(result.Stdout)
+		if name == "" {
+			return nil, fmt.Errorf("DEB 文件中未找到 Package 字段: %s", f)
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		names = append(names, name)
+	}
+	return names, nil
 }
 
 func prepareAPT(profile *config.ProfileConfig) error {

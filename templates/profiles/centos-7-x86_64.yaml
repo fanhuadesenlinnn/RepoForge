@@ -1,0 +1,9 @@
+schema_version: 1
+profile: centos-7-x86_64
+backend: rpm
+target:
+  os: centos
+  version: "7"
+  arch: x86_64
+online:
+  releasever: "7"

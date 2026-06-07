@@ -26,13 +26,11 @@ func newInitCommand() *cobra.Command {
 			fmt.Fprintf(command.OutOrStdout(), `RepoForge 初始化完成。
 
 Home：%s
-配置目录：%s/config
-软件源目录：%s/repos
 
 下一步：
-1. 编辑 %s/config/packages.yaml
-2. 执行 repoforge make --profile kylin-v10-sp3-x86_64
-`, homeDir, homeDir, homeDir, homeDir)
+1. 编辑 %s/config/packages.yaml，添加需要的软件包
+2. 执行 repoforge make 开始制作离线源
+`, homeDir, homeDir)
 			return nil
 		},
 	}

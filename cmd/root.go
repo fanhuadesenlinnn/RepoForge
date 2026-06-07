@@ -11,11 +11,14 @@ const longDescription = `RepoForge 是 Linux 离线软件源构建与分发工�
 
 常用命令：
   repoforge init
-  repoforge check --profile xxx
-  repoforge make --profile xxx
-  repoforge use --profile xxx
+  repoforge check
+  repoforge make
+  repoforge use
   repoforge server start
-  repoforge server enable`
+  repoforge server enable
+  repoforge server status
+
+自动匹配当前系统 profile，也可用 --profile 指定。`
 
 func newRootCommand() *cobra.Command {
 	root := &cobra.Command{

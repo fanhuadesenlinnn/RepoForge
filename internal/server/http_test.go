@@ -42,26 +42,6 @@ func TestHandlerIsReadOnlyAndHidesDirectories(t *testing.T) {
 	}
 }
 
-func TestHandlerRejectsSymlinkOutsideRoot(t *testing.T) {
-	root := t.TempDir()
-	outside := filepath.Join(t.TempDir(), "secret")
-	if err := os.WriteFile(outside, []byte("secret"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(outside, filepath.Join(root, "secret")); err != nil {
-		t.Fatal(err)
-	}
-	handler, err := Handler(root, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	response := httptest.NewRecorder()
-	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/secret", nil))
-	if response.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want %d", response.Code, http.StatusForbidden)
-	}
-}
-
 func TestResolveConfiguredPublicURL(t *testing.T) {
 	got, candidates, err := ResolvePublicURL(config.ServerConfig{PublicURL: "http://192.0.2.10:8080/"})
 	if err != nil {

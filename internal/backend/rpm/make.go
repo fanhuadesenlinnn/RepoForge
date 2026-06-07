@@ -6,6 +6,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/fanhuadesenlinnn/RepoForge/internal/backend"
 	"github.com/fanhuadesenlinnn/RepoForge/internal/config"
 	"github.com/fanhuadesenlinnn/RepoForge/internal/detect"
 	"github.com/fanhuadesenlinnn/RepoForge/internal/executor"
@@ -17,9 +18,18 @@ func (b *Backend) Make(ctx context.Context, cfg *config.Config, profile *config.
 	if err := b.Check(ctx, profile); err != nil {
 		return err
 	}
-	if len(packages) == 0 {
-		return fmt.Errorf("profile %q 的软件包列表为空", profile.Profile)
+
+	// Collect input package files from configured package_dirs.
+	inputPkgs, err := backend.CollectPackageFiles(profile.Input.PackageDirs, ".rpm", profile.Input.Recursive)
+	if err != nil {
+		return err
 	}
+
+	// Require at least one source of packages.
+	if len(packages) == 0 && len(inputPkgs) == 0 {
+		return fmt.Errorf("profile %q 没有配置软件包，也没有找到输入 RPM 文件", profile.Profile)
+	}
+
 	if err := fileutil.EnsureDir(profile.Repository.PackageDir, 0o755); err != nil {
 		return err
 	}
@@ -32,11 +42,17 @@ func (b *Backend) Make(ctx context.Context, cfg *config.Config, profile *config.
 		return err
 	}
 
+	// Copy input packages into the repository package directory.
+	repoPkgs, err := backend.CopyPackagesToRepo(inputPkgs, profile.Repository.PackageDir)
+	if err != nil {
+		return err
+	}
+
 	manager, err := detect.FindAny(b.runner, "dnf", "yum")
 	if err != nil {
 		return err
 	}
-	args := rpmDownloadArgs(profile, packages)
+	args := rpmDownloadArgs(profile, packages, repoPkgs)
 	if _, err := b.runner.Run(ctx, executor.Command{
 		Name:        manager,
 		Args:        args,
@@ -65,7 +81,7 @@ func (b *Backend) Make(ctx context.Context, cfg *config.Config, profile *config.
 	return b.VerifyRepo(profile)
 }
 
-func rpmDownloadArgs(profile *config.ProfileConfig, packages []string) []string {
+func rpmDownloadArgs(profile *config.ProfileConfig, packages []string, rpmFiles []string) []string {
 	args := []string{"--installroot=" + profile.Online.Installroot}
 	if profile.Online.Releasever != "" {
 		args = append(args, "--releasever="+profile.Online.Releasever)
@@ -83,5 +99,7 @@ func rpmDownloadArgs(profile *config.ProfileConfig, packages []string) []string 
 		"--downloaddir", profile.Repository.PackageDir,
 		fmt.Sprintf("--setopt=install_weak_deps=%t", profile.Online.IncludeWeakDeps),
 	)
-	return append(args, packages...)
+	args = append(args, packages...)
+	args = append(args, rpmFiles...)
+	return args
 }

@@ -72,6 +72,12 @@ type PackageProfile struct {
 	Packages []string `yaml:"packages"`
 }
 
+// InputConfig describes package import sources.
+type InputConfig struct {
+	PackageDirs []string `yaml:"package_dirs"`
+	Recursive   bool     `yaml:"recursive"`
+}
+
 type ProfileConfig struct {
 	SchemaVersion int                 `yaml:"schema_version"`
 	Profile       string              `yaml:"profile"`
@@ -82,6 +88,7 @@ type ProfileConfig struct {
 	Repository    RepositoryConfig    `yaml:"repository"`
 	LocalRepo     LocalRepoConfig     `yaml:"local_repo"`
 	ClientRepo    ClientRepoConfig    `yaml:"client_repo"`
+	Input         InputConfig         `yaml:"input"`
 }
 
 type TargetConfig struct {

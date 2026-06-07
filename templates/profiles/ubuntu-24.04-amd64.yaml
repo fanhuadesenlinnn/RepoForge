@@ -1,0 +1,8 @@
+schema_version: 1
+profile: ubuntu-24.04-amd64
+backend: deb
+target:
+  os: ubuntu
+  version: "24.04"
+  codename: noble
+  arch: amd64

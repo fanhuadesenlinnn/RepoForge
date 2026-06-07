@@ -10,6 +10,7 @@ import (
 	"github.com/fanhuadesenlinnn/RepoForge/internal/config"
 	"github.com/fanhuadesenlinnn/RepoForge/internal/executor"
 	"github.com/fanhuadesenlinnn/RepoForge/internal/initialize"
+	pkgbackend "github.com/fanhuadesenlinnn/RepoForge/internal/backend"
 )
 
 type fakeRunner struct {
@@ -103,4 +104,136 @@ func initializedRPM(t *testing.T) (*config.Config, *config.ProfileConfig) {
 		t.Fatal(err)
 	}
 	return cfg, profile
+}
+
+func TestCollectPackageFilesEmptyDirs(t *testing.T) {
+	files, err := pkgbackend.CollectPackageFiles(nil, ".rpm", false)
+	if err != nil || files != nil {
+		t.Fatalf("unexpected result for nil dirs: %v, %v", files, err)
+	}
+	files, err = pkgbackend.CollectPackageFiles([]string{}, ".rpm", true)
+	if err != nil || files != nil {
+		t.Fatalf("unexpected result for empty dirs: %v, %v", files, err)
+	}
+}
+
+func TestCollectPackageFilesDirNotFound(t *testing.T) {
+	_, err := pkgbackend.CollectPackageFiles([]string{"/nonexistent/path/for/test"}, ".rpm", false)
+	if err == nil {
+		t.Fatal("expected error for missing dir")
+	}
+}
+
+func TestCollectPackageFilesNonRecursive(t *testing.T) {
+	dir := t.TempDir()
+	_ = os.WriteFile(filepath.Join(dir, "example.rpm"), []byte("rpm"), 0o644)
+	_ = os.WriteFile(filepath.Join(dir, "readme.txt"), []byte("txt"), 0o644)
+	_ = os.MkdirAll(filepath.Join(dir, "subdir"), 0o755)
+	_ = os.WriteFile(filepath.Join(dir, "subdir", "nested.rpm"), []byte("nested"), 0o644)
+
+	files, err := pkgbackend.CollectPackageFiles([]string{dir}, ".rpm", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 1 || !strings.HasSuffix(files[0], "example.rpm") {
+		t.Fatalf("expected 1 file (example.rpm), got: %v", files)
+	}
+}
+
+func TestCollectPackageFilesRecursive(t *testing.T) {
+	dir := t.TempDir()
+	_ = os.WriteFile(filepath.Join(dir, "example.rpm"), []byte("rpm"), 0o644)
+	_ = os.MkdirAll(filepath.Join(dir, "subdir"), 0o755)
+	_ = os.WriteFile(filepath.Join(dir, "subdir", "nested.rpm"), []byte("nested"), 0o644)
+	_ = os.WriteFile(filepath.Join(dir, "subdir", "readme.txt"), []byte("txt"), 0o644)
+
+	files, err := pkgbackend.CollectPackageFiles([]string{dir}, ".rpm", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 2 {
+		t.Fatalf("expected 2 files, got %d: %v", len(files), files)
+	}
+}
+
+func TestCollectPackageFilesNoMatchFound(t *testing.T) {
+	dir := t.TempDir()
+	_ = os.WriteFile(filepath.Join(dir, "readme.txt"), []byte("txt"), 0o644)
+
+	_, err := pkgbackend.CollectPackageFiles([]string{dir}, ".rpm", true)
+	if err == nil {
+		t.Fatal("expected error when no matching files found")
+	}
+}
+
+func TestCopyPackagesToRepoCopyNewFile(t *testing.T) {
+	srcDir := t.TempDir()
+	dstDir := t.TempDir()
+	src := filepath.Join(srcDir, "example.rpm")
+	if err := os.WriteFile(src, []byte("rpm content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	results, err := pkgbackend.CopyPackagesToRepo([]string{src}, dstDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 || filepath.Base(results[0]) != "example.rpm" {
+		t.Fatalf("unexpected results: %v", results)
+	}
+	data, err := os.ReadFile(results[0])
+	if err != nil || string(data) != "rpm content" {
+		t.Fatalf("copy failed: %v", err)
+	}
+}
+
+func TestCopyPackagesToRepoSkipSameSize(t *testing.T) {
+	srcDir := t.TempDir()
+	dstDir := t.TempDir()
+	src := filepath.Join(srcDir, "example.rpm")
+	if err := os.WriteFile(src, []byte("same"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dst := filepath.Join(dstDir, "example.rpm")
+	if err := os.WriteFile(dst, []byte("same"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	results, err := pkgbackend.CopyPackagesToRepo([]string{src}, dstDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got: %v", results)
+	}
+	// File should not have been overwritten (same size skip).
+	data, _ := os.ReadFile(dst)
+	if string(data) != "same" {
+		t.Fatal("file was unexpectedly overwritten")
+	}
+}
+
+func TestCopyPackagesToRepoOverwriteDifferentSize(t *testing.T) {
+	srcDir := t.TempDir()
+	dstDir := t.TempDir()
+	src := filepath.Join(srcDir, "example.rpm")
+	if err := os.WriteFile(src, []byte("newer content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dst := filepath.Join(dstDir, "example.rpm")
+	if err := os.WriteFile(dst, []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	results, err := pkgbackend.CopyPackagesToRepo([]string{src}, dstDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got: %v", results)
+	}
+	data, _ := os.ReadFile(dst)
+	if string(data) != "newer content" {
+		t.Fatalf("file not overwritten, got: %s", data)
+	}
 }

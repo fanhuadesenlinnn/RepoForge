@@ -1,8 +1,8 @@
 schema_version: 1
-profile: debian-12-amd64
+profile: debian-11-amd64
 backend: deb
 target:
   os: debian
-  version: "12"
-  codename: bookworm
+  version: "11"
+  codename: bullseye
   arch: amd64

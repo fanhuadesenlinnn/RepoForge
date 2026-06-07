@@ -23,8 +23,8 @@ func TestGenerateClientRepos(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, path := range []string{
-		filepath.Join(home, "client", "repoforge-debian.list"),
-		filepath.Join(home, "client", "repoforge-kylin.repo"),
+		filepath.Join(home, "client", "repoforge-debian-12-amd64.list"),
+		filepath.Join(home, "client", "repoforge-kylin-v10-sp3-x86_64.repo"),
 	} {
 		data, err := os.ReadFile(path)
 		if err != nil {

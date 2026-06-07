@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.2.0
+
+- 新增：下载软件包时实时显示进度（apt-get / dnf/yum 输出流式回显）。
+- 新增：支持从 RPM 输入目录导入已有 rpm 并自动补齐缺失依赖。
+- 新增：init 默认生成 11 个主流系统 profile（麒麟/CentOS/Rocky/openEuler/Debian/Ubuntu）。
+- 调整：默认不禁用所有仓库，`disable_repos` 改为空列表。
+- 调整：配置字段 `rpm_dirs` 重命名为 `package_dirs`，移除 `copy_input_rpms`（始终复制）。
+- 调整：DEB 后端用 `dpkg-deb` 提取包名后按包名下载，兼容所有 apt 版本。
+- 调整：profile 配置大幅简化（50行→7行），路径自动推导，兼容性检查放宽。
+- 调整：`make`/`use`/`check` 无需 `--profile`，自动匹配当前系统。
+- 调整：`packages.yaml` 模板精简，用户只添加需要的包名即可。
+
 ## v0.1.0
 
 - 提供目录自包含的 RepoForge CLI 和幂等初始化。

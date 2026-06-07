@@ -3,8 +3,10 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/fanhuadesenlinnn/RepoForge/internal/config"
 	"github.com/fanhuadesenlinnn/RepoForge/internal/detect"
@@ -55,30 +57,56 @@ func newCheckCommand() *cobra.Command {
 			fmt.Fprintf(output, "[OK] 当前系统: %s %s %s (backend=%s)\n",
 				system.PrettyName, system.VersionID, system.RawArch, system.Backend)
 
-			if profileName != "" {
-				profile, err := config.LoadProfile(homeDir, profileName)
-				if err != nil {
-					return err
+			// Auto-match or list profiles.
+			if profileName == "" {
+				matches, _ := config.FindMatchingProfiles(homeDir, system.ID, system.RawArch, system.Backend)
+				if len(matches) == 1 {
+					profileName = matches[0].Profile
+					fmt.Fprintf(output, "[OK] 自动匹配 profile: %s\n", profileName)
+				} else {
+					// List all profiles for reference.
+					all, err := config.LoadProfiles(homeDir)
+					if err == nil {
+						names := make([]string, len(all))
+						for i, p := range all {
+							names[i] = p.Profile
+						}
+						fmt.Fprintf(output, "[INFO] 可用 profile: %s\n", strings.Join(names, ", "))
+					}
+					if len(matches) > 1 {
+						matchNames := make([]string, len(matches))
+						for i, p := range matches {
+							matchNames[i] = p.Profile
+						}
+						fmt.Fprintf(output, "[INFO] 匹配当前系统的 profile: %s\n", strings.Join(matchNames, ", "))
+					}
+					return nil
 				}
-				fmt.Fprintf(output, "[OK] profile 配置有效: %s (%s)\n", profile.Profile, profile.Backend)
-				if err := detect.CheckCompatibility(system, profile); err != nil {
-					return err
-				}
+			}
+
+			profile, err := config.LoadProfile(homeDir, profileName)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(output, "[OK] profile 配置有效: %s (%s)\n", profile.Profile, profile.Backend)
+			if err := detect.CheckCompatibility(system, profile); err != nil {
+				fmt.Fprintf(output, "[WARN] 兼容性: %v\n", err)
+			} else {
 				fmt.Fprintf(output, "[OK] profile 匹配: %s\n", profile.Profile)
-				commandsOK := checkCommands(output, runner, profile)
-				checkRepository(output, cfg, profile)
-				if !commandsOK {
-					return fmt.Errorf("检查发现缺失的依赖命令，请按上方提示安装后重试")
-				}
+			}
+			commandsOK := checkCommands(output, runner, profile)
+			checkRepository(output, cfg, profile)
+			if !commandsOK {
+				return fmt.Errorf("检查发现缺失的依赖命令，请按上方提示安装后重试")
 			}
 			return nil
 		},
 	}
-	command.Flags().StringVar(&profileName, "profile", "", "要检查的 profile 名称")
+	command.Flags().StringVar(&profileName, "profile", "", "要检查的 profile 名称（留空自动匹配当前系统）")
 	return command
 }
 
-func checkCommands(output interface{ Write([]byte) (int, error) }, runner executor.Runner, profile *config.ProfileConfig) bool {
+func checkCommands(output io.Writer, runner executor.Runner, profile *config.ProfileConfig) bool {
 	ok := true
 	var groups [][]string
 	if profile.Backend == "rpm" {
@@ -98,7 +126,7 @@ func checkCommands(output interface{ Write([]byte) (int, error) }, runner execut
 	return ok
 }
 
-func checkRepository(output interface{ Write([]byte) (int, error) }, cfg *config.Config, profile *config.ProfileConfig) {
+func checkRepository(output io.Writer, cfg *config.Config, profile *config.ProfileConfig) {
 	index := filepath.Join(profile.Repository.PackageDir, "repodata", "repomd.xml")
 	if profile.Backend == "deb" {
 		index = filepath.Join(profile.Repository.PackageDir, "Packages.gz")

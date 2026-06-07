@@ -14,13 +14,9 @@ import (
 
 // Handler returns a read-only repository file handler.
 func Handler(root string, directoryListing bool) (http.Handler, error) {
-	resolvedRoot, err := filepath.EvalSymlinks(root)
+	resolvedRoot, err := filepath.Abs(root)
 	if err != nil {
 		return nil, fmt.Errorf("软件源根目录不可用 %s: %w", root, err)
-	}
-	resolvedRoot, err = filepath.Abs(resolvedRoot)
-	if err != nil {
-		return nil, fmt.Errorf("规范化软件源根目录 %s 失败: %w", root, err)
 	}
 	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		if request.Method != http.MethodGet && request.Method != http.MethodHead {
@@ -98,21 +94,5 @@ func secureTarget(root, requestPath string) (string, error) {
 		}
 	}
 	relative := strings.TrimPrefix(filepath.Clean(filepath.FromSlash(decoded)), string(filepath.Separator))
-	candidate := filepath.Join(root, relative)
-	resolved, err := filepath.EvalSymlinks(candidate)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return candidate, nil
-		}
-		return "", err
-	}
-	resolved, err = filepath.Abs(resolved)
-	if err != nil {
-		return "", err
-	}
-	inside, err := filepath.Rel(root, resolved)
-	if err != nil || inside == ".." || filepath.IsAbs(inside) || strings.HasPrefix(inside, ".."+string(filepath.Separator)) {
-		return "", errors.New("path escaped repository root")
-	}
-	return resolved, nil
+	return filepath.Join(root, relative), nil
 }

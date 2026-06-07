@@ -1,0 +1,9 @@
+schema_version: 1
+profile: rocky-9-x86_64
+backend: rpm
+target:
+  os: rocky
+  version: "9"
+  arch: x86_64
+online:
+  releasever: "9"

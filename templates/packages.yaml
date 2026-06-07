@@ -1,36 +1,36 @@
 schema_version: 1
 
+# 在此文件中添加你要下载的软件包名。
+# 每个 profile 对应一个目标系统，包名填写该系统的原生命令包名。
+#
+# 示例：
+# profiles:
+#   centos-7-x86_64:
+#     packages:
+#       - vim
+#       - curl
+#       - wget
+
 profiles:
   kylin-v10-sp3-x86_64:
-    packages:
-      - vim
-      - wget
-      - curl
-      - tar
-      - unzip
-      - net-tools
-      - bind-utils
-      - lsof
-      - rsync
-      - firewalld
-      - audit
-      - aide
-      - sysstat
-      - htop
-      - iotop
+    packages: []
+  kylin-v10-sp3-aarch64:
+    packages: []
+  centos-7-x86_64:
+    packages: []
+  rocky-8-x86_64:
+    packages: []
+  rocky-9-x86_64:
+    packages: []
+  openEuler-22.03-x86_64:
+    packages: []
+  openEuler-24.03-x86_64:
+    packages: []
+  debian-11-amd64:
+    packages: []
   debian-12-amd64:
-    packages:
-      - vim
-      - wget
-      - curl
-      - tar
-      - unzip
-      - net-tools
-      - dnsutils
-      - lsof
-      - rsync
-      - ufw
-      - auditd
-      - sysstat
-      - htop
-      - iotop
+    packages: []
+  ubuntu-22.04-amd64:
+    packages: []
+  ubuntu-24.04-amd64:
+    packages: []

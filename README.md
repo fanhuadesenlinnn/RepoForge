@@ -18,21 +18,20 @@ RepoForge 是一个用于离线、内网和隔离网络环境的 Linux 软件源
 从 [Releases](https://github.com/fanhuadesenlinnn/RepoForge/releases) 下载对应架构的压缩包，并解压到 `/opt`：
 
 ```bash
-sudo tar -C /opt -xzf repoforge_v0.1.0_linux_amd64.tar.gz
+sudo tar -C /opt -xzf repoforge_v0.2.0_linux_amd64.tar.gz
 sudo /opt/repoforge/bin/repoforge init
 ```
 
-编辑软件包列表：
+编辑软件包列表（添加你需要的包）：
 
 ```bash
 sudo vi /opt/repoforge/config/packages.yaml
 ```
 
-在在线机器制作软件源：
+在在线机器制作软件源（自动匹配当前系统 profile）：
 
 ```bash
-/opt/repoforge/bin/repoforge check --profile kylin-v10-sp3-x86_64
-/opt/repoforge/bin/repoforge make --profile kylin-v10-sp3-x86_64
+/opt/repoforge/bin/repoforge make
 ```
 
 将整个目录复制到离线机器：
@@ -44,7 +43,7 @@ scp -r /opt/repoforge root@offline-host:/opt/repoforge
 在离线机器启用本机软件源：
 
 ```bash
-sudo /opt/repoforge/bin/repoforge use --profile kylin-v10-sp3-x86_64
+sudo /opt/repoforge/bin/repoforge use
 ```
 
 将离线机器作为局域网软件源：
@@ -58,11 +57,12 @@ sudo /opt/repoforge/bin/repoforge server enable
 
 ```text
 repoforge init [--force]                 初始化目录和默认配置
-repoforge check [--profile NAME]         只读检查环境、依赖和仓库状态
-repoforge make --profile NAME            下载包及依赖并生成软件源索引
-repoforge use --profile NAME             启用本机 file:// 软件源
-repoforge use --disable --profile NAME   禁用本机软件源
-repoforge use --disable --remove --profile NAME
+repoforge check                          检查环境、匹配 profile、仓库状态
+repoforge make                           下载包及依赖并生成软件源索引
+repoforge make --profile NAME            指定 profile 制作
+repoforge use                            启用本机 file:// 软件源
+repoforge use --disable                  禁用本机软件源
+repoforge use --disable --remove         禁用并删除配置文件
 repoforge server start                   前台启动只读 HTTP 服务
 repoforge server enable                  安装并启动 systemd 服务
 repoforge server stop                    停止 systemd 服务
@@ -97,6 +97,30 @@ repoforge server status                  查看服务和可用 profile
 - `repoforge server stop`、`repoforge server disable`：管理 systemd 服务。
 
 RepoForge 不修改其他软件源配置。禁用或删除时只处理自己管理的源文件和 systemd unit。
+
+## 从已有 RPM 目录补齐依赖
+
+如果已有一批 rpm 包，可以在 profile 中配置：
+
+```yaml
+input:
+  package_dirs:
+    - /root/input-rpms
+  recursive: false
+```
+
+然后执行：
+
+```bash
+repoforge make --profile kylin-v10-sp3-x86_64
+```
+
+RepoForge 会：
+
+1. 扫描输入目录中的 rpm；
+2. 复制到当前 profile 的软件源目录；
+3. 调用 dnf/yum 下载这些 rpm 缺失的依赖；
+4. 生成 createrepo_c 索引。
 
 ## 客户端使用
 

@@ -66,7 +66,7 @@ main() {
     -ldflags "-s -w -X github.com/fanhuadesenlinnn/RepoForge/internal/version.Version=$version -X github.com/fanhuadesenlinnn/RepoForge/internal/version.Commit=$commit -X github.com/fanhuadesenlinnn/RepoForge/internal/version.Date=$build_date" \
     -o "$TEMP_DIR/repoforge/bin/repoforge" .
 
-  cp README.md CHANGELOG.md repoforge_codex_execution_plan.md "$TEMP_DIR/repoforge/"
+  cp README.md CHANGELOG.md "$TEMP_DIR/repoforge/"
   archive="$output_dir/repoforge_${version}_linux_${arch}.tar.gz"
   tar -C "$TEMP_DIR" -czf "$archive" repoforge
   log_info "Created $archive"

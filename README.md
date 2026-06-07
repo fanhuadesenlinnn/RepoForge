@@ -175,4 +175,4 @@ go vet ./...
 go build -o bin/repoforge .
 ```
 
-项目的详细实现计划见 [repoforge_codex_execution_plan.md](repoforge_codex_execution_plan.md)。
+项目的详细实现计划仅保留在源码仓库中，不随发布包分发。

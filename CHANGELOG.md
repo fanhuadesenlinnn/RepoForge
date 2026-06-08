@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.2.1
+
+- 新增：`packages.yaml` 预置常用基础包（vim、curl、wget、telnet、nc），开箱即用。
+- 调整：`packages.yaml` 注释更友好，每个包标注用途。
+
 ## v0.2.0
 
 - 新增：下载软件包时实时显示进度（apt-get / dnf/yum 输出流式回显）。

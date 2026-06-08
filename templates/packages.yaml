@@ -1,36 +1,96 @@
 schema_version: 1
 
-# 在此文件中添加你要下载的软件包名。
-# 每个 profile 对应一个目标系统，包名填写该系统的原生命令包名。
+# =============================================================================
+# 软件包列表 —— 在此添加你需要的软件包。
 #
-# 示例：
-# profiles:
-#   centos-7-x86_64:
-#     packages:
-#       - vim
-#       - curl
-#       - wget
+# 每个 profile 对应一个目标系统，包名填写该系统的原生包名。
+# 包名区分大小写，一行一个，缩进需保持一致。
+#
+# 以下已预置常用的基础命令行工具：
+#   vim       文本编辑器
+#   curl      网络请求工具
+#   wget      下载工具
+#   telnet    远程登录
+#   nc        网络调试（DEB 用 netcat-openbsd）
+#
+# 按需添加、删除或修改即可。不需要的包可直接删除对应行。
+# =============================================================================
 
 profiles:
   kylin-v10-sp3-x86_64:
-    packages: []
+    packages:
+      - vim
+      - curl
+      - wget
+      - telnet
+      - nc
   kylin-v10-sp3-aarch64:
-    packages: []
+    packages:
+      - vim
+      - curl
+      - wget
+      - telnet
+      - nc
   centos-7-x86_64:
-    packages: []
+    packages:
+      - vim
+      - curl
+      - wget
+      - telnet
+      - nc
   rocky-8-x86_64:
-    packages: []
+    packages:
+      - vim
+      - curl
+      - wget
+      - telnet
+      - nc
   rocky-9-x86_64:
-    packages: []
+    packages:
+      - vim
+      - curl
+      - wget
+      - telnet
+      - nc
   openEuler-22.03-x86_64:
-    packages: []
+    packages:
+      - vim
+      - curl
+      - wget
+      - telnet
+      - nc
   openEuler-24.03-x86_64:
-    packages: []
+    packages:
+      - vim
+      - curl
+      - wget
+      - telnet
+      - nc
   debian-11-amd64:
-    packages: []
+    packages:
+      - vim
+      - curl
+      - wget
+      - telnet
+      - netcat-openbsd
   debian-12-amd64:
-    packages: []
+    packages:
+      - vim
+      - curl
+      - wget
+      - telnet
+      - netcat-openbsd
   ubuntu-22.04-amd64:
-    packages: []
+    packages:
+      - vim
+      - curl
+      - wget
+      - telnet
+      - netcat-openbsd
   ubuntu-24.04-amd64:
-    packages: []
+    packages:
+      - vim
+      - curl
+      - wget
+      - telnet
+      - netcat-openbsd

@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.3.0
+
+- 新增：`make-upgrade` 命令，支持为 RPM 系统下载当前机器升级所需的软件包并生成离线升级源。
+- 新增：`list` 命令，可查看本地软件源目录中已有的软件包。
+- 调整：README 快速开始和常用命令示例补充 `v0.3.0` 发布包、`make-upgrade` 与 `list` 的用法。
+
 ## v0.2.1
 
 - 新增：`packages.yaml` 预置常用基础包（vim、curl、wget、telnet、nc），开箱即用。

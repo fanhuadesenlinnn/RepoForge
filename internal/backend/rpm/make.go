@@ -63,6 +63,10 @@ func (b *Backend) Make(ctx context.Context, cfg *config.Config, profile *config.
 		return fmt.Errorf("下载 RPM 软件包及依赖失败: %w", err)
 	}
 
+	return b.generateMetadata(ctx, profile)
+}
+
+func (b *Backend) generateMetadata(ctx context.Context, profile *config.ProfileConfig) error {
 	tool := profile.Repository.MetadataTool
 	if tool == "" {
 		tool = "createrepo_c"

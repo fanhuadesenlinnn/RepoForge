@@ -13,6 +13,7 @@ const longDescription = `RepoForge 是 Linux 离线软件源构建与分发工�
   repoforge init
   repoforge check
   repoforge make
+  repoforge make-upgrade
   repoforge use
   repoforge server start
   repoforge server enable
@@ -36,6 +37,7 @@ func newRootCommand() *cobra.Command {
 		newInitCommand(),
 		newCheckCommand(),
 		newMakeCommand(),
+		newMakeUpgradeCommand(),
 		newUseCommand(),
 		newServerCommand(),
 	)

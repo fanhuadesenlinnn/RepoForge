@@ -53,37 +53,45 @@ backend: %s
 }
 
 func loadMakeInputs(ctx context.Context, requestedProfile string) (string, *config.Config, *config.ProfileConfig, []string, executor.Runner, error) {
-	homeDir, err := home.Detect(false)
+	homeDir, cfg, profile, runner, err := loadProfileInputs(ctx, requestedProfile)
 	if err != nil {
 		return "", nil, nil, nil, nil, err
 	}
-	cfg, err := config.Load(homeDir)
+	packages, err := config.PackagesForProfile(homeDir, profile.Profile)
 	if err != nil {
 		return "", nil, nil, nil, nil, err
+	}
+	return homeDir, cfg, profile, packages, runner, nil
+}
+
+func loadProfileInputs(ctx context.Context, requestedProfile string) (string, *config.Config, *config.ProfileConfig, executor.Runner, error) {
+	homeDir, err := home.Detect(false)
+	if err != nil {
+		return "", nil, nil, nil, err
+	}
+	cfg, err := config.Load(homeDir)
+	if err != nil {
+		return "", nil, nil, nil, err
 	}
 	runner := executor.New(false)
 	system, err := detect.Current(ctx, runner)
 	if err != nil {
-		return "", nil, nil, nil, nil, err
+		return "", nil, nil, nil, err
 	}
 
 	profileName, err := resolveProfile(homeDir, requestedProfile, system)
 	if err != nil {
-		return "", nil, nil, nil, nil, err
+		return "", nil, nil, nil, err
 	}
 
 	profile, err := config.LoadProfile(homeDir, profileName)
 	if err != nil {
-		return "", nil, nil, nil, nil, err
-	}
-	packages, err := config.PackagesForProfile(homeDir, profileName)
-	if err != nil {
-		return "", nil, nil, nil, nil, err
+		return "", nil, nil, nil, err
 	}
 	if err := detect.CheckCompatibility(system, profile); err != nil {
-		return "", nil, nil, nil, nil, err
+		return "", nil, nil, nil, err
 	}
-	return homeDir, cfg, profile, packages, runner, nil
+	return homeDir, cfg, profile, runner, nil
 }
 
 // resolveProfile resolves the profile to use: explicit > auto-detect > error.

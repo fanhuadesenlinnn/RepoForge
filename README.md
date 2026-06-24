@@ -20,7 +20,7 @@ RepoForge 是一个用于离线、内网和隔离网络环境的 Linux 软件源
 从 [Releases](https://github.com/fanhuadesenlinnn/RepoForge/releases) 下载对应架构的压缩包，并解压到 `/opt`：
 
 ```bash
-sudo tar -C /opt -xzf repoforge_v0.2.0_linux_amd64.tar.gz
+sudo tar -C /opt -xzf repoforge_v0.3.0_linux_amd64.tar.gz
 sudo /opt/repoforge/bin/repoforge init
 ```
 

@@ -7,11 +7,13 @@ RepoForge 是一个用于离线、内网和隔离网络环境的 Linux 软件源
 ## 支持范围
 
 - RPM 系统：使用 `dnf` 或 `yum` 下载依赖，使用 `createrepo_c` 生成索引。
+- RPM 系统升级源：使用 `dnf upgrade --downloadonly` 或 `yum update --downloadonly` 下载当前系统升级所需 RPM 包，并使用 `createrepo_c` 生成索引。
 - DEB 系统：使用 `apt-get` 下载依赖，使用 `dpkg-scanpackages` 生成索引。
 - HTTP 分发：使用 Go 标准库提供仅允许 GET/HEAD 的文件服务。
 - 服务管理：使用 systemd 安装、启停和查看 HTTP 服务。
 
 制作离线源时，应使用与目标机器相同的发行版、版本和架构。
+制作系统升级离线源时，应使用与目标机器相同发行版、版本、架构、已安装包状态尽量一致的在线机器。
 
 ## 快速开始
 
@@ -32,6 +34,12 @@ sudo vi /opt/repoforge/config/packages.yaml
 
 ```bash
 /opt/repoforge/bin/repoforge make
+```
+
+在在线机器制作当前系统升级离线源：
+
+```bash
+/opt/repoforge/bin/repoforge make-upgrade
 ```
 
 将整个目录复制到离线机器：
@@ -60,6 +68,8 @@ repoforge init [--force]                 初始化目录和默认配置
 repoforge check                          检查环境、匹配 profile、仓库状态
 repoforge make                           下载包及依赖并生成软件源索引
 repoforge make --profile NAME            指定 profile 制作
+repoforge make-upgrade                   下载当前系统升级所需 RPM 包并生成软件源索引
+repoforge make-upgrade --profile NAME    指定 profile 制作系统升级离线源
 repoforge use                            启用本机 file:// 软件源
 repoforge use --disable                  禁用本机软件源
 repoforge use --disable --remove         禁用并删除配置文件
@@ -121,6 +131,24 @@ RepoForge 会：
 2. 复制到当前 profile 的软件源目录；
 3. 调用 dnf/yum 下载这些 rpm 缺失的依赖；
 4. 生成 createrepo_c 索引。
+
+## 制作系统升级离线源
+
+RPM 系统可以使用 `make-upgrade` 下载当前系统升级所需 RPM 包：
+
+```bash
+repoforge make-upgrade --profile kylin-v10-sp3-x86_64
+```
+
+RepoForge 会：
+
+1. 使用当前系统已安装包状态计算可升级包；
+2. 调用 `dnf upgrade --downloadonly` 或 `yum update --downloadonly` 下载 RPM 包；
+3. 下载目录使用当前 profile 的 `repository.package_dir`；
+4. 调用 `createrepo_c --update` 生成 yum/dnf 软件源索引；
+5. 校验 `repodata/repomd.xml`。
+
+注意：`make-upgrade` 不使用 `--installroot`。如果在线制作机与离线目标机已安装包状态差异较大，生成的升级源可能无法完整覆盖目标机升级需求。
 
 ## 客户端使用
 

@@ -42,6 +42,12 @@ sudo vi /opt/repoforge/config/packages.yaml
 /opt/repoforge/bin/repoforge make-upgrade
 ```
 
+查看本地软件源中已有的软件包：
+
+```bash
+/opt/repoforge/bin/repoforge list
+```
+
 将整个目录复制到离线机器：
 
 ```bash
@@ -70,6 +76,8 @@ repoforge make                           下载包及依赖并生成软件源索
 repoforge make --profile NAME            指定 profile 制作
 repoforge make-upgrade                   下载当前系统升级所需 RPM 包并生成软件源索引
 repoforge make-upgrade --profile NAME    指定 profile 制作系统升级离线源
+repoforge list                           列出本地软件源中的软件包
+repoforge list --profile NAME            指定 profile 列出软件包
 repoforge use                            启用本机 file:// 软件源
 repoforge use --disable                  禁用本机软件源
 repoforge use --disable --remove         禁用并删除配置文件
@@ -149,6 +157,16 @@ RepoForge 会：
 5. 校验 `repodata/repomd.xml`。
 
 注意：`make-upgrade` 不使用 `--installroot`。如果在线制作机与离线目标机已安装包状态差异较大，生成的升级源可能无法完整覆盖目标机升级需求。
+
+## 查看本地软件源软件包
+
+可以使用 `list` 查看当前 profile 软件源目录中的软件包：
+
+```bash
+repoforge list --profile kylin-v10-sp3-x86_64
+```
+
+RPM backend 会优先使用 `rpm -qp` 读取 RPM 包头，并输出包名、版本、发布号、架构、大小和文件名。DEB backend 当前按 deb 文件名和大小输出。
 
 ## 客户端使用
 

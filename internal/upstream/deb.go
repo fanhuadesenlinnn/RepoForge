@@ -130,12 +130,13 @@ func parseDEBPackages(baseURL, text string) ([]Pkg, error) {
 			fields[curKey] = strings.TrimSpace(line[idx+1:])
 		}
 		pkg := Pkg{
-			Name:     fields["Package"],
-			Version:  fields["Version"],
-			Arch:     fields["Architecture"],
-			Location: fields["Filename"],
-			Checksum: fields["SHA256"],
-			Summary:  fields["Description"],
+			Name:      fields["Package"],
+			Version:   fields["Version"],
+			Arch:      fields["Architecture"],
+			Location:  fields["Filename"],
+			Checksum:  fields["SHA256"],
+			Summary:   fields["Description"],
+			MultiArch: fields["Multi-Arch"],
 		}
 		if n, err := strconv.ParseInt(fields["Size"], 10, 64); err == nil {
 			pkg.Size = n

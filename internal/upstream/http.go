@@ -14,12 +14,16 @@ import (
 // because several mirror sites (e.g. USTC) fingerprint and block the default
 // "Go-http-client/1.1" UA.
 func newHTTPClient() *http.Client {
-	return &http.Client{Transport: &http.Transport{
-		// reuse connections across downloads
-		MaxIdleConns:        64,
-		MaxIdleConnsPerHost: 16,
-		IdleConnTimeout:     90e9, // 90s
-	}}
+	return &http.Client{
+		Transport: &http.Transport{
+			// reuse connections across downloads
+			MaxIdleConns:        64,
+			MaxIdleConnsPerHost: 16,
+			IdleConnTimeout:     90e9, // 90s
+			// don't let a dead mirror block connection setup forever
+			ResponseHeaderTimeout: 30e9, // 30s to first response byte
+		},
+	}
 }
 
 // UserAgent reported to mirror sites.

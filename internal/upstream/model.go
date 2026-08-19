@@ -53,6 +53,12 @@ type Pkg struct {
 	Requires   []DependencyEntry // hard dependencies
 	Recommends []DependencyEntry // weak dependencies (recommends)
 	Provides   []string          // names this package provides
+	// MultiArch is the DEB Multi-Arch field (same|foreign|allowed). "foreign"
+	// packages can satisfy dependencies from other architectures.
+	MultiArch string
+	// Files are the file paths this package provides (from RPM filelists.xml).
+	// Used to resolve RPM file-path dependencies (e.g. /usr/bin/killall).
+	Files []string
 	// BaseURL, when non-empty, is the source this package came from (aggregate
 	// repos). Used to resolve downloads from the correct upstream.
 	BaseURL string

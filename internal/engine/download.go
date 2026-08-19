@@ -89,6 +89,12 @@ func (d *downloader) fetch(ctx context.Context, url, dst, checksum string, size 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
 		return fmt.Errorf("GET %s 返回 HTTP %d", url, resp.StatusCode)
 	}
+	// Wrap body with a read-idle timeout so a hung connection aborts rather
+	// than blocking the whole download forever.
+	resp.Body = struct {
+		io.Reader
+		io.Closer
+	}{idleReader{r: resp.Body}, resp.Body}
 
 	f, err := os.OpenFile(part, os.O_CREATE|os.O_RDWR, 0o644)
 	if err != nil {
@@ -217,6 +223,10 @@ func (d *downloader) segmentedFetch(ctx context.Context, url, dst string, size i
 				errs[idx] = fmt.Errorf("segment %d HTTP %d", idx, resp.StatusCode)
 				return
 			}
+			resp.Body = struct {
+				io.Reader
+				io.Closer
+			}{idleReader{r: resp.Body}, resp.Body}
 			// Each goroutine writes at its fixed offset (no shared cursor).
 			f, oerr := os.OpenFile(dst, os.O_WRONLY, 0o644)
 			if oerr != nil {

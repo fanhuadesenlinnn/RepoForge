@@ -170,3 +170,25 @@ func TestParseDEBDepsAnyQualifier(t *testing.T) {
 		t.Fatalf("deps[2] = %+v", deps[2])
 	}
 }
+
+func TestFilelistsParsing(t *testing.T) {
+	flXML := `<?xml version="1.0"?>
+<filelists packages="1">
+  <package pkgid="AAA" name="vim-enhanced" arch="x86_64">
+    <version epoch="0" ver="8.2" rel="1"/>
+    <file>/usr/bin/vim</file>
+    <file>/usr/bin/view</file>
+  </package>
+</filelists>`
+	files := parseFilelistsXML([]byte(flXML))
+	if len(files) != 1 {
+		t.Fatalf("files = %d, want 1", len(files))
+	}
+	fl, ok := files["AAA"]
+	if !ok || len(fl) != 2 {
+		t.Fatalf("AAA files = %v", fl)
+	}
+	if fl[0] != "/usr/bin/vim" {
+		t.Fatalf("file[0] = %q", fl[0])
+	}
+}

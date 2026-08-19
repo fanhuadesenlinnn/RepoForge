@@ -75,13 +75,34 @@ func Solve(ix *upstream.Index, request []string, opt SolveOptions) (map[string]u
 		dep := queue[0]
 		queue = queue[1:]
 
-		// Map file-path requirements (/sbin/ldconfig, /usr/bin/bash) to the
-		// package that owns them. primary.xml omits file provides; we carry a
-		// small built-in table of common paths so these resolve cleanly.
+		// File-path requirement: match via the file list first (from
+		// filelists.xml). Fall back to the built-in fileProvider table when the
+		// repo has no filelists or the file was not listed.
 		if opt.Backend == "rpm" && strings.HasPrefix(dep.Name, "/") {
-			if owner, ok := fileProvider[dep.Name]; ok {
-				dep.Name = owner
+			resolved := false
+			cands := providers(ix, dep.Name, archOK)
+			if len(cands) == 0 {
+				if owner, ok := fileProvider[dep.Name]; ok {
+					if p, ok2 := findByName(ix, owner, archOK); ok2 {
+						cands = []upstream.Pkg{p}
+					}
+				}
 			}
+			if best3 := chooseBest(cands, dep, opt.Backend); best3 != nil {
+				selected[dep.Name] = *best3
+				if !addedLoc[best3.Location] {
+					addedLoc[best3.Location] = true
+					queue = append(queue, best3.Requires...)
+					if opt.WeakDeps {
+						queue = append(queue, best3.Recommends...)
+					}
+				}
+				resolved = true
+			}
+			if !resolved {
+				problems = append(problems, fmt.Sprintf("无法满足依赖: %s", dep.String()))
+			}
+			continue
 		}
 
 		// already satisfied?
@@ -121,7 +142,50 @@ func Solve(ix *upstream.Index, request []string, opt SolveOptions) (map[string]u
 		}
 	}
 
+	// Reconcile: some "unresolved" deps may actually be satisfied by an already
+	// selected package (e.g. a file path whose owning package was pulled in by
+	// another dependency, but filelists weren't available to connect them).
+	// Downgrade those to informational notices instead of hard problems.
+	problems = downgradeSatisfied(dedupe(problems), selected)
+
 	return selected, dedupe(problems), dedupe(notices)
+}
+
+// downgradeSatisfied moves problems whose dependency is satisfiable by an
+// already-selected package into notices.
+func downgradeSatisfied(problems []string, selected map[string]upstream.Pkg) []string {
+	var kept []string
+	for _, p := range problems {
+		if strings.HasPrefix(p, "无法满足依赖: ") {
+			dep := strings.TrimPrefix(p, "无法满足依赖: ")
+			if satisfiedBySelected(dep, selected) {
+				continue // downgrade: provider already selected
+			}
+		}
+		kept = append(kept, p)
+	}
+	return kept
+}
+
+// satisfiedBySelected reports whether any selected package provides the name
+// (by package name, capability, or file path).
+func satisfiedBySelected(name string, selected map[string]upstream.Pkg) bool {
+	for _, p := range selected {
+		if p.Name == name {
+			return true
+		}
+		for _, prov := range p.Provides {
+			if prov == name {
+				return true
+			}
+		}
+		for _, f := range p.Files {
+			if f == name {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // toleratedDep reports whether an unresolvable dependency is a soft/conditional
@@ -160,6 +224,7 @@ func dedupe(s []string) []string {
 }
 
 func providers(ix *upstream.Index, name string, archOK func(upstream.Pkg) bool) []upstream.Pkg {
+	isFile := strings.HasPrefix(name, "/")
 	var out []upstream.Pkg
 	for _, p := range ix.Packages {
 		if !archOK(p) {
@@ -169,6 +234,17 @@ func providers(ix *upstream.Index, name string, archOK func(upstream.Pkg) bool) 
 			out = append(out, p)
 			continue
 		}
+		// File-path requirement matched against the package's file list
+		// (from RPM filelists.xml), the same way YUM resolves it.
+		if isFile {
+			for _, f := range p.Files {
+				if f == name {
+					out = append(out, p)
+					break
+				}
+			}
+			continue
+		}
 		for _, prov := range p.Provides {
 			if providesMatch(prov, name) {
 				out = append(out, p)
@@ -176,6 +252,24 @@ func providers(ix *upstream.Index, name string, archOK func(upstream.Pkg) bool) 
 		}
 	}
 	return out
+}
+
+// findByName returns the best package with the given name, honoring arch filter.
+func findByName(ix *upstream.Index, name string, archOK func(upstream.Pkg) bool) (upstream.Pkg, bool) {
+	var best *upstream.Pkg
+	for i := range ix.Packages {
+		p := &ix.Packages[i]
+		if p.Name != name || !archOK(*p) {
+			continue
+		}
+		if best == nil || pkgNewer(*p, *best, "rpm") > 0 {
+			best = p
+		}
+	}
+	if best == nil {
+		return upstream.Pkg{}, false
+	}
+	return *best, true
 }
 
 // providesMatch reports whether a provided capability satisfies a required

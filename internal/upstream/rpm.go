@@ -45,7 +45,41 @@ func RPMIndex(ctx context.Context, baseURL string) (*Index, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	// Fetch + merge filelists.xml (if the repo provides it) so file-path
+	// dependencies (e.g. /usr/bin/killall) can be resolved precisely — the
+	// same way YUM uses filelists. Missing filelists is not an error.
+	if fh := findData(&rd, "filelists"); fh != "" {
+		if fl := fetchFilelists(ctx, base, fh); len(fl) > 0 {
+			mergeFilelists(pkgs, fl)
+		}
+	}
+
 	return &Index{BaseURL: base, Backend: "rpm", Packages: pkgs}, nil
+}
+
+// findData returns the href for a repomd data type ("" if absent).
+func findData(rd *repomd, typ string) string {
+	for i := range rd.Data {
+		if rd.Data[i].Type == typ {
+			return strings.TrimPrefix(rd.Data[i].Location.Href, "/")
+		}
+	}
+	return ""
+}
+
+// fetchFilelists downloads and parses filelists.xml into a map keyed by pkgid.
+func fetchFilelists(ctx context.Context, base, href string) map[string][]string {
+	url := base + "/" + href
+	raw, err := Fetch(ctx, url)
+	if err != nil {
+		return nil
+	}
+	data, err := decompressAny(raw, href)
+	if err != nil {
+		return nil
+	}
+	return parseFilelistsXML(data)
 }
 
 type repomd struct {
@@ -146,4 +180,43 @@ func parsePrimaryXML(data []byte) ([]Pkg, error) {
 		out = append(out, pkg)
 	}
 	return out, nil
+}
+
+// ---- filelists.xml parsing ----
+
+type filelistsXML struct {
+	Packages []filelistPkg `xml:"package"`
+}
+type filelistPkg struct {
+	PkgID   string   `xml:"pkgid,attr"`
+	Name    string   `xml:"name,attr"`
+	Arch    string   `xml:"arch,attr"`
+	Version flVer    `xml:"version"`
+	Files   []string `xml:"file"`
+}
+type flVer struct {
+	Epoch string `xml:"epoch,attr"`
+	Ver   string `xml:"ver,attr"`
+	Rel   string `xml:"rel,attr"`
+}
+
+func parseFilelistsXML(data []byte) map[string][]string {
+	var fl filelistsXML
+	if xml.Unmarshal(data, &fl) != nil {
+		return nil
+	}
+	out := make(map[string][]string, len(fl.Packages))
+	for _, p := range fl.Packages {
+		out[p.PkgID] = p.Files
+	}
+	return out
+}
+
+// mergeFilelists attaches file provides to packages matched by pkgid (checksum).
+func mergeFilelists(pkgs []Pkg, files map[string][]string) {
+	for i := range pkgs {
+		if f, ok := files[pkgs[i].Checksum]; ok && len(f) > 0 {
+			pkgs[i].Files = f
+		}
+	}
 }

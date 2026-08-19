@@ -7,20 +7,20 @@ import (
 	"path"
 	"time"
 
-	"github.com/fanhuadesenlinnn/RepoForge/internal/config"
+	"github.com/fanhuadesenlinnn/RepoForge/internal/repo"
 )
 
-// CheckProfile checks the local HTTP endpoint for one repository profile.
-func CheckProfile(serverConfig config.ServerConfig, profile *config.ProfileConfig) error {
+// CheckRepo probes the local HTTP endpoint for one repository.
+func CheckRepo(serverConfig repo.Server, name, backend string) error {
 	_, port, err := net.SplitHostPort(serverConfig.Listen)
 	if err != nil {
 		return fmt.Errorf("server.listen 无效 %q: %w", serverConfig.Listen, err)
 	}
-	index := "Packages.gz"
-	if profile.Backend == "rpm" {
+	index := "Packages"
+	if backend == "rpm" {
 		index = "repodata/repomd.xml"
 	}
-	target := "http://" + net.JoinHostPort("127.0.0.1", port) + path.Join("/", profile.Profile, index)
+	target := "http://" + net.JoinHostPort("127.0.0.1", port) + path.Join("/", name, index)
 	request, err := http.NewRequest(http.MethodHead, target, nil)
 	if err != nil {
 		return fmt.Errorf("创建 HTTP 检查请求失败: %w", err)

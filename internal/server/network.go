@@ -7,11 +7,11 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/fanhuadesenlinnn/RepoForge/internal/config"
+	"github.com/fanhuadesenlinnn/RepoForge/internal/repo"
 )
 
 // ResolvePublicURL returns the configured or detected LAN URL and all IP candidates.
-func ResolvePublicURL(cfg config.ServerConfig) (string, []string, error) {
+func ResolvePublicURL(cfg repo.Server) (string, []string, error) {
 	if cfg.PublicURL != "" && cfg.PublicURL != "auto" {
 		parsed, err := url.ParseRequestURI(cfg.PublicURL)
 		if err != nil {

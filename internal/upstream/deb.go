@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/fanhuadesenlinnn/RepoForge/internal/progress"
 )
 
 // DEBSpec describes which suites/components/architectures to read.
@@ -36,6 +38,7 @@ func DEBIndex(ctx context.Context, spec DEBSpec) (*Index, error) {
 		}
 		for _, comp := range comps {
 			for _, arch := range archs {
+				progress.Infof(ctx, "[元数据] 读取 Packages  %s/%s/%s", suite.Name, comp, arch)
 				pkgs, notFound, err := readDEBPackages(ctx, base, suite.Name, comp, arch)
 				if err != nil {
 					return nil, err

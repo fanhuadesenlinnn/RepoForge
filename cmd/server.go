@@ -7,9 +7,7 @@ import (
 	"path/filepath"
 	"syscall"
 
-	oldconfig "github.com/fanhuadesenlinnn/RepoForge/internal/config"
 	"github.com/fanhuadesenlinnn/RepoForge/internal/executor"
-	"github.com/fanhuadesenlinnn/RepoForge/internal/home"
 	"github.com/fanhuadesenlinnn/RepoForge/internal/privilege"
 	"github.com/fanhuadesenlinnn/RepoForge/internal/repo"
 	"github.com/fanhuadesenlinnn/RepoForge/internal/server"
@@ -31,44 +29,9 @@ func newServerCommand() *cobra.Command {
 	return command
 }
 
-// serverAdapter maps the new repo.Config onto the legacy server config consumed
-// by the reusable internal/server sub-package.
-func serverAdapter(c *repo.Config) *oldconfig.Config {
-	return &oldconfig.Config{
-		Paths: oldconfig.PathsConfig{
-			HomeDir:     c.Paths.HomeDir,
-			RepoDir:     c.Paths.RepoDir,
-			CacheDir:    c.Paths.CacheDir,
-			ClientDir:   c.Paths.ClientDir,
-			LogDir:      c.Paths.LogDir,
-			TemplateDir: c.Paths.TemplateDir,
-		},
-		Server: oldconfig.ServerConfig{
-			Listen:           c.Server.Listen,
-			Root:             c.Server.Root,
-			PublicURL:        c.Server.PublicURL,
-			Readonly:         c.Server.Readonly,
-			DirectoryListing: false,
-			Systemd: oldconfig.SystemdConfig{
-				Enabled:     c.Server.Systemd.Enabled,
-				ServiceName: c.Server.Systemd.ServiceName,
-				ServiceFile: c.Server.Systemd.ServiceFile,
-				Restart:     c.Server.Systemd.Restart,
-			},
-		},
-	}
-}
-
-func loadServerConfig() (*repo.Config, *oldconfig.Config, error) {
-	homeDir, err := home.Detect(false)
-	if err != nil {
-		return nil, nil, err
-	}
-	cfg, err := repo.Load(homeDir)
-	if err != nil {
-		return nil, nil, err
-	}
-	return cfg, serverAdapter(cfg), nil
+func loadServerConfig() (*repo.Config, error) {
+	_, cfg, err := loadRepo()
+	return cfg, err
 }
 
 func newServerStartCommand() *cobra.Command {
@@ -77,14 +40,14 @@ func newServerStartCommand() *cobra.Command {
 		Short: "前台启动 HTTP 服务",
 		Args:  noArgs,
 		RunE: func(command *cobra.Command, _ []string) error {
-			_, cfg, err := loadServerConfig()
+			cfg, err := loadServerConfig()
 			if err != nil {
 				return err
 			}
 			fmt.Fprintf(command.OutOrStdout(), "RepoForge HTTP 服务启动：%s\n软件源根目录：%s\n", cfg.Server.Listen, cfg.Server.Root)
 			ctx, stop := signal.NotifyContext(command.Context(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
-			return server.Serve(ctx, cfg.Server.Listen, cfg.Server.Root, cfg.Server.DirectoryListing)
+			return server.Serve(ctx, cfg.Server.Listen, cfg.Server.Root, false)
 		},
 	}
 }
@@ -98,7 +61,7 @@ func newServerEnableCommand() *cobra.Command {
 			if err := privilege.RequireRoot("server enable 需要写入 systemd 服务目录", "sudo repoforge server enable"); err != nil {
 				return err
 			}
-			rcfg, cfg, err := loadServerConfig()
+			cfg, err := loadServerConfig()
 			if err != nil {
 				return err
 			}
@@ -121,10 +84,10 @@ func newServerEnableCommand() *cobra.Command {
 			if len(candidates) > 1 {
 				fmt.Fprintf(command.OutOrStdout(), "[WARN] 检测到多个 IPv4 地址 %v，客户端配置使用 %s\n", candidates, publicURL)
 			}
-			if err := generateClient(rcfg); err != nil {
+			if err := generateClient(cfg); err != nil {
 				return err
 			}
-			fmt.Fprintf(command.OutOrStdout(), "HTTP 服务已启用：%s\n客户端配置目录：%s\n", publicURL, rcfg.Paths.ClientDir)
+			fmt.Fprintf(command.OutOrStdout(), "HTTP 服务已启用：%s\n客户端配置目录：%s\n", publicURL, cfg.Paths.ClientDir)
 			return nil
 		},
 	}
@@ -139,7 +102,7 @@ func newServerStopCommand() *cobra.Command {
 			if err := privilege.RequireRoot("server stop 需要管理 systemd 服务", "sudo repoforge server stop"); err != nil {
 				return err
 			}
-			_, cfg, err := loadServerConfig()
+			cfg, err := loadServerConfig()
 			if err != nil {
 				return err
 			}
@@ -161,7 +124,7 @@ func newServerDisableCommand() *cobra.Command {
 			if err := privilege.RequireRoot("server disable 需要管理 systemd 服务", "sudo repoforge server disable"); err != nil {
 				return err
 			}
-			_, cfg, err := loadServerConfig()
+			cfg, err := loadServerConfig()
 			if err != nil {
 				return err
 			}
@@ -180,7 +143,7 @@ func newServerStatusCommand() *cobra.Command {
 		Short: "查看 HTTP 服务状态",
 		Args:  noArgs,
 		RunE: func(command *cobra.Command, _ []string) error {
-			rcfg, cfg, err := loadServerConfig()
+			cfg, err := loadServerConfig()
 			if err != nil {
 				return err
 			}
@@ -199,9 +162,9 @@ func newServerStatusCommand() *cobra.Command {
 			}
 			fmt.Fprintln(command.OutOrStdout(), "当前可用 repository：")
 			available := 0
-			for i := range rcfg.Repositories {
-				r := &rcfg.Repositories[i]
-				root := rcfg.ContentRoot(r)
+			for i := range cfg.Repositories {
+				r := &cfg.Repositories[i]
+				root := cfg.ContentRoot(r)
 				if !contentRootAvailable(r.Backend, root) {
 					continue
 				}
@@ -209,7 +172,7 @@ func newServerStatusCommand() *cobra.Command {
 				fmt.Fprintf(command.OutOrStdout(), "  - %s，根目录：%s\n", r.Name, root)
 			}
 			if available == 0 {
-				fmt.Fprintln(command.OutOrStdout(), "  （无，请先执行 repoforge sync / install）")
+				fmt.Fprintln(command.OutOrStdout(), "  （无，请先执行 repoforge sync / make）")
 			}
 			return nil
 		},

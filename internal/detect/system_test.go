@@ -4,8 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-
-	"github.com/fanhuadesenlinnn/RepoForge/internal/config"
 )
 
 func TestReadOSAndBackend(t *testing.T) {
@@ -33,34 +31,5 @@ func TestNormalizeArch(t *testing.T) {
 	}
 	if rpm != "aarch64" || deb != "arm64" {
 		t.Fatalf("NormalizeArch() = %s, %s", rpm, deb)
-	}
-}
-
-func TestCheckCompatibility(t *testing.T) {
-	system := System{
-		OS:      OS{ID: "ubuntu", IDLike: []string{"debian"}, VersionID: "24.04"},
-		RPMArch: "aarch64",
-		DEBArch: "arm64",
-		Backend: "deb",
-	}
-	profile := &config.ProfileConfig{
-		Backend: "deb",
-		Target: config.TargetConfig{
-			OS:      "debian",
-			Version: "24.04",
-			Arch:    "arm64",
-		},
-		Compatibility: config.CompatibilityConfig{
-			RequireSameOS:      true,
-			RequireSameVersion: true,
-			RequireSameArch:    true,
-		},
-	}
-	if err := CheckCompatibility(system, profile); err != nil {
-		t.Fatal(err)
-	}
-	profile.Target.Arch = "amd64"
-	if err := CheckCompatibility(system, profile); err == nil {
-		t.Fatal("CheckCompatibility() error = nil, want mismatch")
 	}
 }

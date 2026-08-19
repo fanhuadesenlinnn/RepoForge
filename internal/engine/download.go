@@ -16,6 +16,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/fanhuadesenlinnn/RepoForge/internal/progress"
 	"github.com/fanhuadesenlinnn/RepoForge/internal/repo"
 	"github.com/fanhuadesenlinnn/RepoForge/internal/upstream"
 )
@@ -358,9 +359,12 @@ func (d *downloader) runAll(ctx context.Context, items []downloadItem) (download
 	if len(items) == 0 {
 		return 0, nil
 	}
+	total := len(items)
+	progress.Infof(ctx, "[下载] 开始 共 %d 个文件（并发 %d）", total, d.jobs)
 	sem := make(chan struct{}, d.jobs)
 	var wg sync.WaitGroup
 	var mu sync.Mutex
+	var done int
 	for _, it := range items {
 		wg.Add(1)
 		go func(it downloadItem) {
@@ -371,15 +375,21 @@ func (d *downloader) runAll(ctx context.Context, items []downloadItem) (download
 			case <-ctx.Done():
 				return
 			}
-			if err := d.fetch(ctx, it.URL, it.Dst, it.Checksum, it.Size); err != nil {
-				mu.Lock()
-				errs = append(errs, fmt.Sprintf("%s: %v", it.URL, err))
-				mu.Unlock()
-				return
-			}
+			err := d.fetch(ctx, it.URL, it.Dst, it.Checksum, it.Size)
 			mu.Lock()
-			downloaded++
+			done++
+			n := done
+			if err != nil {
+				errs = append(errs, fmt.Sprintf("%s: %v", it.URL, err))
+			} else {
+				downloaded++
+			}
 			mu.Unlock()
+			status := "完成"
+			if err != nil {
+				status = "失败"
+			}
+			progress.Infof(ctx, "[下载] %d/%d  %s  %s", n, total, status, filepath.Base(it.Dst))
 		}(it)
 	}
 	wg.Wait()

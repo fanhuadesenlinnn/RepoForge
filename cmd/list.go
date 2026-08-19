@@ -1,17 +1,15 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"text/tabwriter"
-	"time"
 
-	"github.com/fanhuadesenlinnn/RepoForge/internal/config"
-	"github.com/fanhuadesenlinnn/RepoForge/internal/executor"
+	"github.com/fanhuadesenlinnn/RepoForge/internal/repo"
 	"github.com/spf13/cobra"
 )
 
@@ -25,81 +23,126 @@ type listedPackage struct {
 }
 
 func newListCommand() *cobra.Command {
-	var profileName string
+	var repoName string
 	command := &cobra.Command{
 		Use:   "list",
-		Short: "列出本地软件源中的软件包",
-		Long: `列出当前 profile 软件源目录中的软件包。
+		Short: "列出本地离线源中的软件包",
+		Long: `按 repo.yaml 列出已制作到本地的软件包。
 
-RPM backend 会优先使用 rpm 查询包头，输出包名、版本、发布号、架构和大小。
-DEB backend 当前按 deb 文件名和大小输出。`,
+默认列出所有仓库；可用 --repo 只看其中一个。不依赖本机 rpm/dpkg。`,
 		Args: noArgs,
 		RunE: func(command *cobra.Command, _ []string) error {
-			homeDir, _, profile, runner, err := loadProfileInputs(command.Context(), profileName)
+			homeDir, cfg, err := loadRepo()
 			if err != nil {
 				return err
 			}
-
-			packages, err := listRepositoryPackages(command.Context(), runner, profile)
-			if err != nil {
-				return err
+			repos := selectRepos(cfg, repoName, func(*repo.Repository) bool { return true })
+			if repoName != "" && len(repos) == 0 {
+				return fmt.Errorf("未找到 repository %q", repoName)
 			}
-
+			if len(repos) == 0 {
+				return fmt.Errorf("repo.yaml 中没有仓库")
+			}
 			output := command.OutOrStdout()
-			fmt.Fprintf(output, `本地软件源软件包列表。
-
-profile: %s
+			var any bool
+			for _, r := range repos {
+				variants, err := repo.Expand(cfg, r)
+				if err != nil {
+					return err
+				}
+				for _, ev := range variants {
+					root := ev.ContentRoot(cfg)
+					packages, err := listRepositoryPackages(root, r.Backend)
+					if err != nil {
+						if os.IsNotExist(err) {
+							fmt.Fprintf(output, "仓库 %s：目录不存在 %s\n\n", r.Name, root)
+							continue
+						}
+						return err
+					}
+					any = true
+					fmt.Fprintf(output, `仓库: %s
 backend: %s
-软件源目录: %s
-RepoForge Home: %s
+目录: %s
+Home: %s
 软件包数量: %d
 软件包总大小: %s
-`, profile.Profile, profile.Backend, profile.Repository.PackageDir, homeDir, len(packages), humanSize(totalPackageSize(packages)))
-			if len(packages) == 0 {
-				fmt.Fprintln(output, "\n未找到软件包。")
-				return nil
-			}
 
-			fmt.Fprintln(output)
-			writer := tabwriter.NewWriter(output, 0, 0, 2, ' ', 0)
-			fmt.Fprintln(writer, "NAME\tVERSION\tRELEASE\tARCH\tSIZE\tFILE")
-			for _, pkg := range packages {
-				fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t%s\t%s\n",
-					pkg.Name,
-					pkg.Version,
-					pkg.Release,
-					pkg.Arch,
-					humanSize(pkg.Size),
-					filepath.Base(pkg.Path),
-				)
+`, r.Name, r.Backend, root, homeDir, len(packages), humanSize(totalPackageSize(packages)))
+					if len(packages) == 0 {
+						fmt.Fprintln(output, "未找到软件包。")
+						fmt.Fprintln(output)
+						continue
+					}
+					writer := tabwriter.NewWriter(output, 0, 0, 2, ' ', 0)
+					fmt.Fprintln(writer, "NAME\tVERSION\tRELEASE\tARCH\tSIZE\tFILE")
+					for _, pkg := range packages {
+						fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t%s\t%s\n",
+							pkg.Name, pkg.Version, pkg.Release, pkg.Arch, humanSize(pkg.Size), pkg.Path)
+					}
+					if err := writer.Flush(); err != nil {
+						return err
+					}
+					fmt.Fprintln(output)
+				}
 			}
-			return writer.Flush()
+			if !any {
+				fmt.Fprintln(output, "本地还没有软件包，请先执行 repoforge sync 或 repoforge make")
+			}
+			return nil
 		},
 	}
-	command.Flags().StringVar(&profileName, "profile", "", "要列出软件包的 profile 名称（留空自动匹配当前系统）")
+	command.Flags().StringVar(&repoName, "repo", "", "要列出的 repository 名称")
 	return command
 }
 
-func listRepositoryPackages(ctx context.Context, runner executor.Runner, profile *config.ProfileConfig) ([]listedPackage, error) {
-	extension := ".rpm"
-	if profile.Backend == "deb" {
-		extension = ".deb"
+func listRepositoryPackages(root, backend string) ([]listedPackage, error) {
+	ext := ".rpm"
+	if backend == "deb" {
+		ext = ".deb"
 	}
-
-	files, err := packageFiles(profile.Repository.PackageDir, extension)
+	var files []string
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			if d.Name() == "repodata" {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if strings.HasPrefix(d.Name(), ".") || strings.HasSuffix(d.Name(), ".part") {
+			return nil
+		}
+		if strings.EqualFold(filepath.Ext(d.Name()), ext) {
+			files = append(files, path)
+		}
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
-
 	packages := make([]listedPackage, 0, len(files))
 	for _, path := range files {
-		pkg, err := packageInfo(ctx, runner, profile.Backend, path)
+		info, err := os.Stat(path)
 		if err != nil {
-			return nil, err
+			continue
 		}
-		packages = append(packages, pkg)
+		rel := path
+		if r, rerr := filepath.Rel(root, path); rerr == nil {
+			rel = r
+		}
+		name, ver, rels, arch := parsePackageFileName(filepath.Base(path), backend)
+		packages = append(packages, listedPackage{
+			Name:    name,
+			Version: ver,
+			Release: rels,
+			Arch:    arch,
+			Path:    rel,
+			Size:    info.Size(),
+		})
 	}
-
 	sort.Slice(packages, func(i, j int) bool {
 		if packages[i].Name != packages[j].Name {
 			return packages[i].Name < packages[j].Name
@@ -107,94 +150,41 @@ func listRepositoryPackages(ctx context.Context, runner executor.Runner, profile
 		if packages[i].Arch != packages[j].Arch {
 			return packages[i].Arch < packages[j].Arch
 		}
-		if packages[i].Version != packages[j].Version {
-			return packages[i].Version < packages[j].Version
-		}
-		return packages[i].Release < packages[j].Release
+		return packages[i].Path < packages[j].Path
 	})
 	return packages, nil
 }
 
-func packageFiles(dir, extension string) ([]string, error) {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil, fmt.Errorf("读取软件源目录失败 %s: %w", dir, err)
-	}
-	files := make([]string, 0)
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
+func parsePackageFileName(base, backend string) (name, ver, rel, arch string) {
+	name, ver, rel, arch = base, "-", "-", "-"
+	if backend == "deb" {
+		base = strings.TrimSuffix(base, ".deb")
+		parts := strings.Split(base, "_")
+		if len(parts) >= 3 {
+			return parts[0], parts[1], "-", parts[len(parts)-1]
 		}
-		name := entry.Name()
-		if strings.EqualFold(filepath.Ext(name), extension) {
-			files = append(files, filepath.Join(dir, name))
+		if len(parts) == 2 {
+			return parts[0], parts[1], "-", "-"
 		}
+		return base, "-", "-", "-"
 	}
-	sort.Strings(files)
-	return files, nil
-}
-
-func packageInfo(ctx context.Context, runner executor.Runner, backendName, path string) (listedPackage, error) {
-	info, err := os.Stat(path)
-	if err != nil {
-		return listedPackage{}, fmt.Errorf("读取软件包文件失败 %s: %w", path, err)
+	base = strings.TrimSuffix(base, ".rpm")
+	dot := strings.LastIndex(base, ".")
+	if dot > 0 {
+		arch = base[dot+1:]
+		base = base[:dot]
 	}
-
-	pkg := listedPackage{
-		Name:    strings.TrimSuffix(filepath.Base(path), filepath.Ext(path)),
-		Version: "-",
-		Release: "-",
-		Arch:    "-",
-		Path:    path,
-		Size:    info.Size(),
+	relAt := strings.LastIndex(base, "-")
+	if relAt <= 0 {
+		return base, "-", "-", arch
 	}
-
-	if backendName != "rpm" {
-		return pkg, nil
+	rel = base[relAt+1:]
+	base = base[:relAt]
+	verAt := strings.LastIndex(base, "-")
+	if verAt <= 0 {
+		return base, rel, "-", arch
 	}
-
-	metadata, err := rpmPackageMetadata(ctx, runner, path)
-	if err != nil {
-		// 文件名兜底，避免单个损坏 RPM 直接导致 list 不可用。
-		pkg.Release = "读取失败"
-		return pkg, nil
-	}
-	pkg.Name = metadata.Name
-	pkg.Version = metadata.Version
-	pkg.Release = metadata.Release
-	pkg.Arch = metadata.Arch
-	return pkg, nil
-}
-
-type rpmMetadata struct {
-	Name    string
-	Version string
-	Release string
-	Arch    string
-}
-
-func rpmPackageMetadata(ctx context.Context, runner executor.Runner, path string) (rpmMetadata, error) {
-	if _, err := runner.LookPath("rpm"); err != nil {
-		return rpmMetadata{}, err
-	}
-	result, err := runner.Run(ctx, executor.Command{
-		Name:    "rpm",
-		Args:    []string{"-qp", "--qf", "%{NAME}\t%{VERSION}\t%{RELEASE}\t%{ARCH}\n", path},
-		Timeout: 30 * time.Second,
-	})
-	if err != nil {
-		return rpmMetadata{}, err
-	}
-	fields := strings.Split(strings.TrimSpace(result.Stdout), "\t")
-	if len(fields) != 4 {
-		return rpmMetadata{}, fmt.Errorf("RPM 元数据格式异常: %s", strings.TrimSpace(result.Stdout))
-	}
-	return rpmMetadata{
-		Name:    fields[0],
-		Version: fields[1],
-		Release: fields[2],
-		Arch:    fields[3],
-	}, nil
+	return base[:verAt], base[verAt+1:], rel, arch
 }
 
 func totalPackageSize(packages []listedPackage) int64 {

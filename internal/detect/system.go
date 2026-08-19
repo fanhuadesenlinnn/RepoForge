@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/fanhuadesenlinnn/RepoForge/internal/config"
 	"github.com/fanhuadesenlinnn/RepoForge/internal/executor"
 )
 
@@ -56,61 +55,4 @@ func NormalizeArch(value string) (raw, rpm, deb string, err error) {
 	default:
 		return value, "", "", fmt.Errorf("不支持的系统架构: %s", value)
 	}
-}
-
-// CheckCompatibility validates the current system against a profile.
-func CheckCompatibility(system System, profile *config.ProfileConfig) error {
-	if profile.Compatibility.AllowCrossBuild {
-		return nil
-	}
-	target := profile.Target
-	if profile.Compatibility.RequireSameOS && !matchesOS(system.OS, target.OS) {
-		return compatibilityError(system, profile)
-	}
-	if profile.Compatibility.RequireSameVersion && !matchesVersion(system.OS, target.Version) {
-		return compatibilityError(system, profile)
-	}
-	currentArch := system.RPMArch
-	if profile.Backend == "deb" {
-		currentArch = system.DEBArch
-	}
-	if profile.Compatibility.RequireSameArch && currentArch != target.Arch {
-		return compatibilityError(system, profile)
-	}
-	if system.Backend != "unknown" && profile.Backend != system.Backend {
-		return compatibilityError(system, profile)
-	}
-	return nil
-}
-
-func matchesOS(system OS, target string) bool {
-	target = strings.ToLower(target)
-	return containsAny(append([]string{system.ID}, system.IDLike...), target)
-}
-
-func matchesVersion(system OS, target string) bool {
-	if target == "" {
-		return true
-	}
-	return strings.EqualFold(system.VersionID, target) ||
-		strings.Contains(strings.ToLower(system.KylinRelease), strings.ToLower(target))
-}
-
-func compatibilityError(system System, profile *config.ProfileConfig) error {
-	currentArch := system.RPMArch
-	if profile.Backend == "deb" {
-		currentArch = system.DEBArch
-	}
-	return fmt.Errorf(`当前系统与 profile 目标系统不一致
-
-当前系统：%s %s %s
-profile 目标：%s %s %s
-
-解决建议：
-1. 请在与目标系统一致的在线机器上制作离线源；
-2. 不建议跨发行版制作离线源；
-3. 如确认风险，可在 profile 中设置 allow_cross_build: true`,
-		system.ID, system.VersionID, currentArch,
-		profile.Target.OS, profile.Target.Version, profile.Target.Arch,
-	)
 }

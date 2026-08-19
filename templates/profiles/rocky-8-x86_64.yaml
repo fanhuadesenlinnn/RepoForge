@@ -1,9 +1,0 @@
-schema_version: 1
-profile: rocky-8-x86_64
-backend: rpm
-target:
-  os: rocky
-  version: "8"
-  arch: x86_64
-online:
-  releasever: "8"

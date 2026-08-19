@@ -79,7 +79,7 @@ func Serve(ctx context.Context, listen, root string, directoryListing bool) erro
 解决建议：
 1. 请检查端口是否被占用；
 2. 可使用 ss -lntp 查看监听端口；
-3. 或修改 config/config.yaml 中的 server.listen: %w`, listen, err)
+3. 或修改 config/repo.yaml 中的 server.listen: %w`, listen, err)
 	}
 }
 

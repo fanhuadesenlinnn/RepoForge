@@ -11,12 +11,9 @@ import (
 
 var directories = []string{
 	"bin",
-	"config/profiles",
 	"config/templates",
 	"repos",
-	"cache/rpm",
-	"cache/deb",
-	"cache/tmp",
+	"cache",
 	"client",
 	"logs",
 }

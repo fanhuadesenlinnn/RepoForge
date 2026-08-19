@@ -113,8 +113,8 @@ func Make(ctx context.Context, cfg *repo.Config, ev *repo.Expanded) (*MakeResult
 	downloaded, errs := d.runAll(ctx, items)
 	problems = append(problems, errs...)
 
-	// 5) Generate repodata over (local copied + downloaded) subset.
-	repodata, gerr := genRepodata(ctx, root, subset, r.Backend)
+	// 5) Generate repodata over packages that actually landed on disk.
+	repodata, gerr := genRepodata(ctx, root, presentPkgs(root, subset), r.Backend)
 	if gerr != nil {
 		return nil, gerr
 	}

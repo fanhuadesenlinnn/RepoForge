@@ -1,149 +1,116 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
-	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
-	"github.com/fanhuadesenlinnn/RepoForge/internal/config"
 	"github.com/fanhuadesenlinnn/RepoForge/internal/detect"
 	"github.com/fanhuadesenlinnn/RepoForge/internal/executor"
-	"github.com/fanhuadesenlinnn/RepoForge/internal/home"
-	"github.com/fanhuadesenlinnn/RepoForge/internal/server"
+	"github.com/fanhuadesenlinnn/RepoForge/internal/repo"
 	"github.com/spf13/cobra"
 )
 
 func newCheckCommand() *cobra.Command {
-	var profileName string
+	var repoName string
 	command := &cobra.Command{
 		Use:   "check",
-		Short: "检查环境和仓库状态",
+		Short: "检查环境和 repo.yaml 仓库状态",
 		Args:  noArgs,
 		RunE: func(command *cobra.Command, _ []string) error {
-			homeDir, err := home.Detect(false)
+			homeDir, cfg, err := loadRepo()
 			if err != nil {
 				return err
 			}
 			output := command.OutOrStdout()
 			fmt.Fprintf(output, "[OK] RepoForge Home: %s\n", homeDir)
 
-			required := []string{
-				filepath.Join(homeDir, "config", "config.yaml"),
-				filepath.Join(homeDir, "config", "packages.yaml"),
-				filepath.Join(homeDir, "repos"),
-				filepath.Join(homeDir, "cache"),
-			}
-			for _, path := range required {
+			for _, path := range []string{cfg.Paths.RepoDir, cfg.Paths.CacheDir, cfg.Paths.ClientDir} {
+				if path == "" {
+					continue
+				}
 				if _, err := os.Stat(path); err != nil {
-					return fmt.Errorf("必需路径不可用 %s: %w", path, err)
+					fmt.Fprintf(output, "[WARN] 路径不存在: %s\n", path)
+					continue
 				}
 				fmt.Fprintf(output, "[OK] 路径存在: %s\n", path)
 			}
+			fmt.Fprintf(output, "[OK] repo.yaml 有效: schema_version=%d, repositories=%d\n",
+				cfg.SchemaVersion, len(cfg.Repositories))
 
-			cfg, err := config.Load(homeDir)
-			if err != nil {
-				return err
+			if system, err := detect.Current(command.Context(), executor.New(false)); err == nil {
+				fmt.Fprintf(output, "[OK] 当前系统: %s %s %s (backend=%s)\n",
+					system.PrettyName, system.VersionID, system.RawArch, system.Backend)
+			} else {
+				fmt.Fprintf(output, "[INFO] 非 Linux 或无法探测本机发行版: %v\n", err)
 			}
-			fmt.Fprintf(output, "[OK] 配置文件有效: schema_version=%d\n", cfg.SchemaVersion)
 
-			runner := executor.New(false)
-			system, err := detect.Current(context.Background(), runner)
-			if err != nil {
-				return err
+			repos := selectRepos(cfg, repoName, func(*repo.Repository) bool { return true })
+			if repoName != "" && len(repos) == 0 {
+				return fmt.Errorf("未找到 repository %q", repoName)
 			}
-			fmt.Fprintf(output, "[OK] 当前系统: %s %s %s (backend=%s)\n",
-				system.PrettyName, system.VersionID, system.RawArch, system.Backend)
-
-			// Auto-match or list profiles.
-			if profileName == "" {
-				matches, _ := config.FindMatchingProfiles(homeDir, system.ID, system.RawArch, system.Backend)
-				if len(matches) == 1 {
-					profileName = matches[0].Profile
-					fmt.Fprintf(output, "[OK] 自动匹配 profile: %s\n", profileName)
-				} else {
-					// List all profiles for reference.
-					all, err := config.LoadProfiles(homeDir)
-					if err == nil {
-						names := make([]string, len(all))
-						for i, p := range all {
-							names[i] = p.Profile
-						}
-						fmt.Fprintf(output, "[INFO] 可用 profile: %s\n", strings.Join(names, ", "))
+			var warned bool
+			for _, r := range repos {
+				variants, err := repo.Expand(cfg, r)
+				if err != nil {
+					return err
+				}
+				for _, ev := range variants {
+					root := ev.ContentRoot(cfg)
+					fmt.Fprintf(output, "\n仓库 %s (%s)\n  上游: %s\n  目录: %s\n", r.Name, r.Backend, ev.URL, root)
+					index := filepath.Join(root, "Packages")
+					if r.Backend == "rpm" {
+						index = filepath.Join(root, "repodata", "repomd.xml")
 					}
-					if len(matches) > 1 {
-						matchNames := make([]string, len(matches))
-						for i, p := range matches {
-							matchNames[i] = p.Profile
-						}
-						fmt.Fprintf(output, "[INFO] 匹配当前系统的 profile: %s\n", strings.Join(matchNames, ", "))
+					if _, err := os.Stat(index); err == nil {
+						fmt.Fprintf(output, "  [OK] 本地索引: %s\n", index)
+					} else {
+						fmt.Fprintf(output, "  [WARN] 本地索引不存在，请先 sync / make\n")
+						warned = true
 					}
-					return nil
+					if ev.URL != "" && !strings.Contains(ev.URL, "example.invalid") {
+						if err := probeUpstream(ev.URL, r.Backend); err != nil {
+							fmt.Fprintf(output, "  [WARN] 上游不可达: %v\n", err)
+							warned = true
+						} else {
+							fmt.Fprintf(output, "  [OK] 上游可访问\n")
+						}
+					}
 				}
 			}
-
-			profile, err := config.LoadProfile(homeDir, profileName)
-			if err != nil {
-				return err
+			if warned {
+				fmt.Fprintln(output, "\n检查完成，存在警告。")
+				return nil
 			}
-			fmt.Fprintf(output, "[OK] profile 配置有效: %s (%s)\n", profile.Profile, profile.Backend)
-			if err := detect.CheckCompatibility(system, profile); err != nil {
-				fmt.Fprintf(output, "[WARN] 兼容性: %v\n", err)
-			} else {
-				fmt.Fprintf(output, "[OK] profile 匹配: %s\n", profile.Profile)
-			}
-			commandsOK := checkCommands(output, runner, profile)
-			checkRepository(output, cfg, profile)
-			if !commandsOK {
-				return fmt.Errorf("检查发现缺失的依赖命令，请按上方提示安装后重试")
-			}
+			fmt.Fprintln(output, "\n检查通过。")
 			return nil
 		},
 	}
-	command.Flags().StringVar(&profileName, "profile", "", "要检查的 profile 名称（留空自动匹配当前系统）")
+	command.Flags().StringVar(&repoName, "repo", "", "只检查指定 repository")
 	return command
 }
 
-func checkCommands(output io.Writer, runner executor.Runner, profile *config.ProfileConfig) bool {
-	ok := true
-	var groups [][]string
-	if profile.Backend == "rpm" {
-		groups = [][]string{{"dnf", "yum"}, {"rpm"}, {profile.Repository.MetadataTool}}
+func probeUpstream(base, backend string) error {
+	url := strings.TrimRight(base, "/")
+	if backend == "rpm" {
+		url += "/repodata/repomd.xml"
 	} else {
-		groups = [][]string{{"apt-get"}, {"apt-cache"}, {profile.Repository.MetadataTool}, {"gzip"}}
+		url += "/dists"
 	}
-	for _, group := range groups {
-		name, err := detect.FindAny(runner, group...)
-		if err != nil {
-			fmt.Fprintf(output, "[ERROR] 未找到命令: %v\n", group)
-			ok = false
-			continue
-		}
-		fmt.Fprintf(output, "[OK] 命令可用: %s\n", name)
+	req, err := http.NewRequest(http.MethodHead, url, nil)
+	if err != nil {
+		return err
 	}
-	return ok
-}
-
-func checkRepository(output io.Writer, cfg *config.Config, profile *config.ProfileConfig) {
-	index := filepath.Join(profile.Repository.PackageDir, "repodata", "repomd.xml")
-	if profile.Backend == "deb" {
-		index = filepath.Join(profile.Repository.PackageDir, "Packages.gz")
+	resp, err := (&http.Client{Timeout: 5 * time.Second}).Do(req)
+	if err != nil {
+		return err
 	}
-	if _, err := os.Stat(index); err == nil {
-		fmt.Fprintf(output, "[OK] 软件源索引存在: %s\n", index)
-	} else {
-		fmt.Fprintf(output, "[WARN] 软件源索引不存在: %s\n", index)
+	resp.Body.Close()
+	if resp.StatusCode >= 400 && resp.StatusCode != http.StatusMethodNotAllowed {
+		return fmt.Errorf("HTTP %d  %s", resp.StatusCode, url)
 	}
-	if _, err := os.Stat(profile.LocalRepo.RepoFile); err == nil {
-		fmt.Fprintf(output, "[OK] 本机源已启用: %s\n", profile.LocalRepo.RepoFile)
-	} else {
-		fmt.Fprintf(output, "[WARN] 本机源未启用: %s\n", profile.LocalRepo.RepoFile)
-	}
-	if err := server.CheckProfile(cfg.Server, profile); err != nil {
-		fmt.Fprintf(output, "[WARN] HTTP 服务检查失败: %v\n", err)
-	} else {
-		fmt.Fprintln(output, "[OK] HTTP 软件源可访问")
-	}
+	return nil
 }

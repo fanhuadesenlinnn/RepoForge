@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/fanhuadesenlinnn/RepoForge/internal/config"
 	"github.com/fanhuadesenlinnn/RepoForge/internal/executor"
 	"github.com/fanhuadesenlinnn/RepoForge/internal/fileutil"
 	"github.com/fanhuadesenlinnn/RepoForge/internal/render"
+	"github.com/fanhuadesenlinnn/RepoForge/internal/repo"
 )
 
 type systemdTemplateData struct {
@@ -32,7 +32,7 @@ func NewManager(runner executor.Runner) *Manager {
 }
 
 // Enable installs, enables, and restarts the systemd service.
-func (m *Manager) Enable(ctx context.Context, cfg *config.Config, executable string) error {
+func (m *Manager) Enable(ctx context.Context, cfg *repo.Config, executable string) error {
 	content, err := render.File(filepath.Join(cfg.Paths.TemplateDir, "repoforge-server.service.tpl"), systemdTemplateData{
 		Home:       cfg.Paths.HomeDir,
 		Executable: executable,
@@ -62,7 +62,7 @@ func (m *Manager) Enable(ctx context.Context, cfg *config.Config, executable str
 }
 
 // Stop stops the managed service when it exists.
-func (m *Manager) Stop(ctx context.Context, cfg *config.Config) error {
+func (m *Manager) Stop(ctx context.Context, cfg *repo.Config) error {
 	if _, err := os.Stat(cfg.Server.Systemd.ServiceFile); os.IsNotExist(err) {
 		return nil
 	} else if err != nil {
@@ -77,7 +77,7 @@ func (m *Manager) Stop(ctx context.Context, cfg *config.Config) error {
 }
 
 // Disable stops, disables, and removes the managed service.
-func (m *Manager) Disable(ctx context.Context, cfg *config.Config) error {
+func (m *Manager) Disable(ctx context.Context, cfg *repo.Config) error {
 	if _, err := os.Stat(cfg.Server.Systemd.ServiceFile); os.IsNotExist(err) {
 		return nil
 	} else if err != nil {
@@ -99,7 +99,7 @@ func (m *Manager) Disable(ctx context.Context, cfg *config.Config) error {
 }
 
 // Status returns a short systemd status without treating inactivity as an error.
-func (m *Manager) Status(ctx context.Context, cfg *config.Config) string {
+func (m *Manager) Status(ctx context.Context, cfg *repo.Config) string {
 	if _, err := os.Stat(cfg.Server.Systemd.ServiceFile); os.IsNotExist(err) {
 		return "未安装"
 	}

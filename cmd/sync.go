@@ -42,14 +42,14 @@ func newSyncCommand() *cobra.Command {
 				}
 				for _, ev := range variants {
 					fmt.Fprintf(command.OutOrStdout(), "开始同步: %s\n  URL: %s\n  输出: %s\n", r.Name, ev.URL, ev.ContentRoot(cfg))
-					result, err := engine.Sync(command.Context(), cfg, &ev)
+					result, err := engine.Sync(withProgress(command), cfg, &ev)
 					if err != nil {
 						fmt.Fprintf(command.OutOrStderr(), "[ERROR] %s: %v\n", r.Name, err)
 						anyErr = true
 						continue
 					}
-					fmt.Fprintf(command.OutOrStdout(), "完成: +%d 跳过 %d 删除 %d 失败 %d（共 %d）\n",
-						result.Downloaded, result.Skipped, result.Deleted, len(result.Errors), result.Total)
+					fmt.Fprintf(command.OutOrStdout(), "完成: +%d 跳过 %d 删除 %d 失败 %d（共 %d）\n  索引: %s\n",
+						result.Downloaded, result.Skipped, result.Deleted, len(result.Errors), result.Total, result.Repodata)
 					for _, e := range result.Errors {
 						fmt.Fprintf(command.OutOrStderr(), "  [WARN] %s\n", e)
 						anyErr = true

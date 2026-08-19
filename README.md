@@ -3,16 +3,17 @@
 RepoForge 是一个**跨平台（Windows / Linux / macOS）**的离线 Linux 软件源构建与分发工具。
 
 它用**单文件配置 `repo.yaml`** 描述一切：多个仓库、上游 URL（支持变量占位符和多值架构）、制作方式
-（全量镜像 `sync` / 按需制作 `install`）。引擎**纯 Go 实现，不依赖本机 dnf/apt/createrepo_c**，
+（全量镜像 `sync` / 按需制作 `make`）。引擎**纯 Go 实现，不依赖本机 dnf/apt/createrepo_c**，
 因此可以在任意机器上制作面向任意发行版的离线 yum/apt 源。
 
 ## 核心能力
 
-- **`sync`**：全量镜像上游仓库（整仓拉取、增量、校验）。
-- **`install`**：按需制作离线源——只下载指定软件及其依赖（RPM 与 DEB **自动依赖求解**）。
-- **`client`**：按 `repo.yaml` 生成客户端 yum/apt 源配置。
-- **`use`**：启用/禁用本机 file:// 软件源。
-- 单文件配置、多仓库、多架构自动展开、变量占位符。
+- **`sync`**：全量镜像上游仓库（整仓拉取、增量、校验），并生成带 Requires/Provides 的 yum/apt 索引。
+- **`make`**：按需制作离线源——只下载指定软件及其依赖（RPM 与 DEB **自动依赖求解**）。
+- **`make-upgrade`**：对照本机已装包，从上游拉更新及依赖（需在目标 Linux 上运行）。
+- **`list` / `check`**：查看本地离线源、检查 repo.yaml 与上游可达性。
+- **`client` / `use` / `server`**：生成客户端配置、启用本机 file:// 源、局域网 HTTP 分发。
+- 单文件配置、多仓库、多架构自动展开、变量占位符、下载进度输出。
 
 ### 下载能力
 
@@ -43,6 +44,15 @@ repoforge make vim curl --repo rocky-9-install
 
 # 生成客户端源配置
 repoforge client
+
+# 对照本机已装包制作升级源（需在目标 Linux 上）
+repoforge make-upgrade --repo rocky-9
+
+# 列出本地离线源里的包
+repoforge list
+
+# 检查环境和仓库状态
+repoforge check
 
 # 本机启用 file:// 软件源（Linux，需 root）
 sudo repoforge use
@@ -129,8 +139,8 @@ repositories:
 
 ## 依赖求解
 
-`install` 会从上游仓库元数据中解析依赖关系（RPM 的 Requires/Provides、DEB 的 Depends/Provides），
-传递求解并选择合适版本，生成可离线使用的 repodata（RPM 生成 `repomd.xml` + `primary.xml.gz`，
+`make` / `sync` 会从上游仓库元数据中解析依赖关系（RPM 的 Requires/Provides、DEB 的 Depends/Provides），
+传递求解并选择合适版本，生成可离线使用的 repodata（RPM 生成 `repomd.xml` + 带 Requires/Provides 的 `primary.xml.gz`，
 DEB 生成 `Packages`）。全程不调用本机包管理器。
 
 内部已处理：
@@ -145,8 +155,8 @@ DEB 生成 `Packages`）。全程不调用本机包管理器。
 repo.yaml
  ├─ internal/repo     单文件配置模型 / loader / 变量展开 / 目录推导
  ├─ internal/upstream 上游元数据解析（RPM repomd→primary；DEB suites→Packages）
- ├─ internal/engine   制作引擎（下载/校验/增量/repodata/依赖求解），sync + install
- ├─ cmd               命令层（sync / install / client / use / server ...）
+ ├─ internal/engine   制作引擎（下载/校验/增量/repodata/依赖求解），sync + make
+ ├─ cmd               命令层（sync / make / list / check / client / use / server ...）
  └─ 复用基础设施      home / fileutil / render / privilege
 ```
 

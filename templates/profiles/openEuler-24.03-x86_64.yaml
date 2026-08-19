@@ -1,9 +1,0 @@
-schema_version: 1
-profile: openEuler-24.03-x86_64
-backend: rpm
-target:
-  os: openEuler
-  version: "24.03"
-  arch: x86_64
-online:
-  releasever: "24.03"

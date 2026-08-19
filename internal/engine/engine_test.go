@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -29,6 +30,35 @@ var rpmPkgs = []pkgDef{
 }
 
 func sha(p string) string { h := sha256.Sum256([]byte(p)); return hex.EncodeToString(h[:]) }
+
+func readGeneratedPrimary(t *testing.T, root string) string {
+	t.Helper()
+	entries, err := os.ReadDir(filepath.Join(root, "repodata"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if !strings.HasSuffix(e.Name(), "-primary.xml.gz") {
+			continue
+		}
+		raw, err := os.ReadFile(filepath.Join(root, "repodata", e.Name()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		gr, err := gzip.NewReader(bytes.NewReader(raw))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer gr.Close()
+		data, err := io.ReadAll(gr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(data)
+	}
+	t.Fatal("no generated primary.xml.gz")
+	return ""
+}
 
 func rpmPrimaryXML() []byte {
 	var b strings.Builder
@@ -119,11 +149,26 @@ repositories:
 	if result.Downloaded != 3 {
 		t.Fatalf("downloaded = %d, want 3", result.Downloaded)
 	}
+	root := variants[0].ContentRoot(cfg)
 	for _, p := range rpmPkgs {
-		fp := filepath.Join(variants[0].ContentRoot(cfg), strings.TrimPrefix(p.path, "/"))
+		fp := filepath.Join(root, strings.TrimPrefix(p.path, "/"))
 		if _, err := os.Stat(fp); err != nil {
 			t.Errorf("missing %s: %v", fp, err)
 		}
+	}
+	if result.Repodata == "" {
+		t.Fatal("sync did not generate repodata")
+	}
+	repomd := filepath.Join(root, "repodata", "repomd.xml")
+	if _, err := os.Stat(repomd); err != nil {
+		t.Fatalf("sync did not write repomd.xml: %v", err)
+	}
+	primary := readGeneratedPrimary(t, root)
+	if !strings.Contains(primary, "<rpm:requires>") || !strings.Contains(primary, "libc.so.6()(64bit)") {
+		t.Fatalf("primary missing requires: %s", primary)
+	}
+	if !strings.Contains(primary, "<rpm:provides>") {
+		t.Fatalf("primary missing provides: %s", primary)
 	}
 	// incremental: second run should skip all
 	result2, _ := Sync(t.Context(), cfg, &variants[0])
@@ -161,9 +206,51 @@ repositories:
 	if res.Selected != 3 {
 		t.Fatalf("selected = %d, want 3", res.Selected)
 	}
-	repomd := filepath.Join(variants[0].ContentRoot(cfg), "repodata", "repomd.xml")
+	root := variants[0].ContentRoot(cfg)
+	repomd := filepath.Join(root, "repodata", "repomd.xml")
 	if _, err := os.Stat(repomd); err != nil {
 		t.Fatalf("install did not generate repomd.xml: %v", err)
+	}
+	primary := readGeneratedPrimary(t, root)
+	if !strings.Contains(primary, "<rpm:requires>") {
+		t.Fatalf("make primary missing requires: %s", primary)
+	}
+}
+
+func TestMakeUpgradeSelectsNewer(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(rpmHandler))
+	defer srv.Close()
+	home := t.TempDir()
+	content := fmt.Sprintf(`schema_version: 2
+paths:
+  repo_dir: %s/repos
+repositories:
+  - name: rocky
+    backend: rpm
+    upstream:
+      url: %s
+    sync:
+      enabled: true
+`, home, srv.URL)
+	cfg := loadConfig(t, home, content)
+	r := &cfg.Repositories[0]
+	variants, _ := repo.Expand(cfg, r)
+	installed := []InstalledPkg{
+		{Name: "vim", Epoch: "0", Version: "8.1", Release: "1", Arch: "x86_64"},
+		{Name: "glibc", Epoch: "0", Version: "2.34", Release: "1", Arch: "x86_64"}, // same as upstream
+	}
+	res, err := MakeUpgrade(t.Context(), cfg, &variants[0], installed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// vim 8.1 -> 8.2 plus glibc deps of vim; glibc itself is not newer so not an upgrade name,
+	// but vim still pulls glibc as a dependency.
+	if res.Selected < 1 {
+		t.Fatalf("selected = %d, want at least vim", res.Selected)
+	}
+	vim := filepath.Join(variants[0].ContentRoot(cfg), "Packages/v/vim.rpm")
+	if _, err := os.Stat(vim); err != nil {
+		t.Fatalf("expected upgraded vim: %v", err)
 	}
 }
 

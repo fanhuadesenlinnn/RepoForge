@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"strings"
+
+	"github.com/fanhuadesenlinnn/RepoForge/internal/progress"
 )
 
 // RPMIndex fetches and parses an RPM repository's metadata into a unified Index
@@ -26,6 +28,7 @@ func RPMIndexForSolve(ctx context.Context, baseURL string) (*Index, error) {
 func rpmIndex(ctx context.Context, baseURL string, withFilelists bool) (*Index, error) {
 	base := strings.TrimRight(baseURL, "/")
 	repomdURL := base + "/repodata/repomd.xml"
+	progress.Infof(ctx, "[元数据] 读取 repomd.xml  %s", repomdURL)
 	data, err := Fetch(ctx, repomdURL)
 	if err != nil {
 		return nil, fmt.Errorf("读取上游 repomd.xml: %w", err)
@@ -46,6 +49,7 @@ func rpmIndex(ctx context.Context, baseURL string, withFilelists bool) (*Index, 
 	}
 	href := strings.TrimPrefix(primary.Location.Href, "/")
 	primaryURL := base + "/" + href
+	progress.Infof(ctx, "[元数据] 读取 primary.xml  %s", href)
 	raw, err := Fetch(ctx, primaryURL)
 	if err != nil {
 		return nil, fmt.Errorf("读取 %s: %w", primaryURL, err)
@@ -59,6 +63,7 @@ func rpmIndex(ctx context.Context, baseURL string, withFilelists bool) (*Index, 
 	if err != nil {
 		return nil, err
 	}
+	progress.Infof(ctx, "[元数据] 已解析 primary.xml（%d 包）", len(pkgs))
 
 	// Fetch + merge filelists.xml (when resolving dependencies and the repo
 	// provides it) so file-path dependencies (e.g. /usr/bin/killall) can be
@@ -67,8 +72,10 @@ func rpmIndex(ctx context.Context, baseURL string, withFilelists bool) (*Index, 
 	// extra large download on slow mirrors. Missing filelists is not an error.
 	if withFilelists {
 		if fh := findData(&rd, "filelists"); fh != "" {
+			progress.Infof(ctx, "[元数据] 读取 filelists.xml  %s", fh)
 			if fl := fetchFilelists(ctx, base, fh); len(fl) > 0 {
 				mergeFilelists(pkgs, fl)
+				progress.Infof(ctx, "[元数据] 已合并 filelists（%d 包含文件列表）", len(fl))
 			}
 		}
 	}

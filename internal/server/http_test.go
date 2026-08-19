@@ -8,9 +8,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/fanhuadesenlinnn/RepoForge/internal/config"
 	"github.com/fanhuadesenlinnn/RepoForge/internal/executor"
 	"github.com/fanhuadesenlinnn/RepoForge/internal/initialize"
+	"github.com/fanhuadesenlinnn/RepoForge/internal/repo"
 )
 
 func TestHandlerIsReadOnlyAndHidesDirectories(t *testing.T) {
@@ -43,14 +43,14 @@ func TestHandlerIsReadOnlyAndHidesDirectories(t *testing.T) {
 }
 
 func TestResolveConfiguredPublicURL(t *testing.T) {
-	got, candidates, err := ResolvePublicURL(config.ServerConfig{PublicURL: "http://192.0.2.10:8080/"})
+	got, candidates, err := ResolvePublicURL(repo.Server{PublicURL: "http://192.0.2.10:8080/"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got != "http://192.0.2.10:8080" || candidates != nil {
 		t.Fatalf("ResolvePublicURL() = %q, %v", got, candidates)
 	}
-	if _, _, err := ResolvePublicURL(config.ServerConfig{PublicURL: "not-a-url"}); err == nil {
+	if _, _, err := ResolvePublicURL(repo.Server{PublicURL: "not-a-url"}); err == nil {
 		t.Fatal("ResolvePublicURL accepted invalid URL")
 	}
 }
@@ -73,7 +73,7 @@ func TestManagerEnableAndDisable(t *testing.T) {
 	if err := initialize.Run(home, false); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := config.Load(home)
+	cfg, err := repo.Load(home)
 	if err != nil {
 		t.Fatal(err)
 	}

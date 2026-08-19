@@ -9,16 +9,16 @@ import (
 
 const longDescription = `RepoForge 是跨平台（Windows/Linux/macOS）Linux 离线软件源构建与分发工具。
 
-新式命令（单文件 repo.yaml 配置，纯 Go，不依赖本机源）：
-  repoforge sync      全量镜像上游仓库
-  repoforge make      按需制作离线源（点名 / 本地补齐依赖 / 升级）
-  repoforge client    生成客户端 yum/apt 源配置
-
-其他命令：
-  repoforge init
-  repoforge check
-  repoforge use
-  repoforge server start
+单文件 repo.yaml 配置，引擎纯 Go，不依赖本机 dnf/apt/createrepo：
+  repoforge init          初始化目录
+  repoforge sync          全量镜像上游仓库
+  repoforge make          按需制作离线源（点名 / 本地包 / 升级包）
+  repoforge make-upgrade  对照本机已装包制作升级源（需在目标 Linux 上）
+  repoforge list          列出本地离线源中的包
+  repoforge check         检查环境和仓库状态
+  repoforge client        生成客户端 yum/apt 源配置
+  repoforge use           启用本机 file:// 源
+  repoforge server        局域网 HTTP 分发
 `
 
 func newRootCommand() *cobra.Command {

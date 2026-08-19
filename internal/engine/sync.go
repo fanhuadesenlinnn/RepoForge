@@ -22,6 +22,7 @@ type SyncResult struct {
 	Skipped    int
 	Deleted    int
 	Errors     []string
+	Repodata   string
 }
 
 // Sync mirrors an expanded repository variant fully.
@@ -41,6 +42,12 @@ func Sync(ctx context.Context, cfg *repo.Config, ev *repo.Expanded) (*SyncResult
 	d := newDownloader(ev.Repository.Sync.Concurrency, ev.Repository.Sync.Segment, ev.Repository.Sync.SegmentThreshold, ev.Repository.Sync.Resume)
 	d.applyFragileTune(expandedURLs(ev)...)
 	downloaded, errs := d.runAll(ctx, items)
+
+	present := presentPkgs(root, ix.Packages)
+	repodata, gerr := genRepodata(ctx, root, present, ev.Repository.Backend)
+	if gerr != nil {
+		return nil, fmt.Errorf("生成索引失败: %w", gerr)
+	}
 
 	// persistence: update state with all current packages.
 	st := state{Revision: fmt.Sprintf("%d", time.Now().Unix()), SyncedAt: time.Now(), Packages: map[string]string{}}
@@ -65,6 +72,7 @@ func Sync(ctx context.Context, cfg *repo.Config, ev *repo.Expanded) (*SyncResult
 		Skipped:    skipped,
 		Deleted:    deleted,
 		Errors:     errs,
+		Repodata:   repodata,
 	}, nil
 }
 

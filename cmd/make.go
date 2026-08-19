@@ -63,7 +63,7 @@ func newMakeCommand() *cobra.Command {
 						r.Name, pkgs, r.Input.UpgradePackages, ev.ContentRoot(cfg))
 					mk := ev
 					mk.Repository.Input.Packages = pkgs
-					result, err := engine.Make(command.Context(), cfg, &mk)
+					result, err := engine.Make(withProgress(command), cfg, &mk)
 					if err != nil {
 						fmt.Fprintf(command.OutOrStderr(), "[ERROR] %s: %v\n", r.Name, err)
 						anyErr = true

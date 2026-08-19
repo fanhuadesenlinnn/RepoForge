@@ -51,7 +51,7 @@ func (d Detector) Detect(forInit bool) (string, error) {
 	if found := searchUp(executableDir, markerName, false); found != "" {
 		return found, nil
 	}
-	if found := searchUp(executableDir, filepath.Join("config", "config.yaml"), false); found != "" {
+	if found := searchUp(executableDir, filepath.Join("config", "repo.yaml"), false); found != "" {
 		return found, nil
 	}
 
@@ -60,7 +60,7 @@ func (d Detector) Detect(forInit bool) (string, error) {
 		if found := searchUp(workingDir, markerName, false); found != "" {
 			return found, nil
 		}
-		if found := searchUp(workingDir, filepath.Join("config", "config.yaml"), false); found != "" {
+		if found := searchUp(workingDir, filepath.Join("config", "repo.yaml"), false); found != "" {
 			return found, nil
 		}
 	}

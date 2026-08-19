@@ -67,21 +67,23 @@ func newHTTPClient() *http.Client {
 	}
 }
 
+// connIdleLimit is the TCP-level read/write deadline applied on every I/O. It
+// is a constant (not the mutable ReadIdleLimit) so background transport
+// goroutines never read a global that tests may shorten — that would be a
+// data race. The per-request watchdog (IdleBody) aborts much sooner anyway.
+const connIdleLimit = 30 * time.Second
+
 // deadlineConn refreshes a read/write deadline on every I/O so a stalled
 // CDN (headers sent, body frozen) cannot hang the client forever.
 type deadlineConn struct{ net.Conn }
 
 func (c *deadlineConn) Read(b []byte) (int, error) {
-	if d := ReadIdleLimit; d > 0 {
-		_ = c.SetReadDeadline(time.Now().Add(d))
-	}
+	_ = c.SetReadDeadline(time.Now().Add(connIdleLimit))
 	return c.Conn.Read(b)
 }
 
 func (c *deadlineConn) Write(b []byte) (int, error) {
-	if d := ReadIdleLimit; d > 0 {
-		_ = c.SetWriteDeadline(time.Now().Add(d))
-	}
+	_ = c.SetWriteDeadline(time.Now().Add(connIdleLimit))
 	return c.Conn.Write(b)
 }
 
@@ -133,25 +135,28 @@ func PrepareRequest(req *http.Request) {
 
 // IdleBody wraps a response body so that silence longer than ReadIdleLimit
 // cancels the request context (which unblocks Read). cancel must belong to
-// the request's context.
+// the request's context. The limit is snapshotted at creation so background
+// reads never touch the mutable global (see connIdleLimit for the same idea).
 func IdleBody(body io.ReadCloser, cancel context.CancelFunc) io.ReadCloser {
 	if body == nil {
 		return body
 	}
-	t := time.AfterFunc(ReadIdleLimit, cancel)
-	return &idleBody{ReadCloser: body, timer: t, cancel: cancel}
+	limit := ReadIdleLimit
+	t := time.AfterFunc(limit, cancel)
+	return &idleBody{ReadCloser: body, timer: t, cancel: cancel, limit: limit}
 }
 
 type idleBody struct {
 	io.ReadCloser
 	timer  *time.Timer
 	cancel context.CancelFunc
+	limit  time.Duration
 }
 
 func (b *idleBody) Read(p []byte) (int, error) {
 	n, err := b.ReadCloser.Read(p)
 	if n > 0 {
-		b.timer.Reset(ReadIdleLimit)
+		b.timer.Reset(b.limit)
 	}
 	return n, err
 }

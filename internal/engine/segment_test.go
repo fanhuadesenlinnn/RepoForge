@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/fanhuadesenlinnn/RepoForge/internal/repo"
@@ -25,14 +26,14 @@ func TestSegmentedDownload(t *testing.T) {
 	sum := sha256.Sum256(content)
 	checksum := hex.EncodeToString(sum[:])
 
-	var rangeCount int64
+	var rangeCount atomic.Int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rng := r.Header.Get("Range")
 		if rng == "" {
 			w.Write(content)
 			return
 		}
-		rangeCount++
+		rangeCount.Add(1)
 		var a, b int
 		n, _ := fmt.Sscanf(strings.TrimPrefix(rng, "bytes="), "%d-%d", &a, &b)
 		if n == 1 {
@@ -54,8 +55,8 @@ func TestSegmentedDownload(t *testing.T) {
 	if err := d.fetch(context.Background(), srv.URL, dst, checksum, int64(size)); err != nil {
 		t.Fatalf("segmented fetch: %v", err)
 	}
-	if rangeCount < 2 {
-		t.Fatalf("expected multiple range segments, got %d", rangeCount)
+	if rangeCount.Load() < 2 {
+		t.Fatalf("expected multiple range segments, got %d", rangeCount.Load())
 	}
 	got, err := os.ReadFile(dst)
 	if err != nil {

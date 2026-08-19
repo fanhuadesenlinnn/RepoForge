@@ -165,6 +165,12 @@ func applyDefaults(home string, cfg *Config) {
 		if r.Sync.Concurrency <= 0 {
 			r.Sync.Concurrency = 8
 		}
+		if r.Sync.SegmentThreshold <= 0 {
+			r.Sync.SegmentThreshold = 20 // MiB per segment
+		}
+		if r.Sync.MaxSegments <= 0 {
+			r.Sync.MaxSegments = 8
+		}
 		if r.Dependency.Conflicts == "" {
 			r.Dependency.Conflicts = "report"
 		}

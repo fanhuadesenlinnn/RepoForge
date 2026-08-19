@@ -44,10 +44,12 @@ repositories:
     sync:
       enabled: true
       delete_policy: keep
-      concurrency: 8     # 并行下载数（多个包同时拉）
-      resume: true       # 断点续传（中断后从断点继续）
+      concurrency: 8        # 多文件并行：同时下载几个包（默认 8）
+      segment_threshold: 20 # 每段基准大小 MiB（默认 20），段数自动按文件大小计算
+      max_segments: 8       # 单个大文件最多切几段（默认 8）
+      resume: true          # 断点续传（中断后从断点继续）
     # output = ${repo_dir}/rocky-9/{x86_64,aarch64}/（多架构自动展开）
-    # 大文件（>4MB）会自动分段并行下载加速。
+    # 大文件自动分段：如 100MiB→5段、200MiB→8段(封顶)、≤20MiB→单连接。
 
   # ── RPM 按需制作：只下载指定软件 + 自动依赖求解 ────────
   - name: rocky-9-install

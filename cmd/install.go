@@ -69,6 +69,9 @@ func newInstallCommand() *cobra.Command {
 					}
 					fmt.Fprintf(command.OutOrStdout(), "完成: 已选 %d 包，下载 %d，repodata: %s\n",
 						result.Selected, result.Downloaded, result.Repodata)
+					for _, n := range result.Notices {
+						fmt.Fprintf(command.OutOrStdout(), "  [INFO] %s\n", n)
+					}
 					for _, p := range result.Problems {
 						fmt.Fprintf(command.OutOrStderr(), "  [WARN] %s\n", p)
 						anyErr = true

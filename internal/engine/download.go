@@ -20,26 +20,33 @@ import (
 
 // downloader downloads packages with bounded concurrency and checksum verify.
 type downloader struct {
-	client *http.Client
-	jobs   int
-	resume bool
+	client      *http.Client
+	jobs        int   // multi-file parallel count
+	maxSegments int   // cap on segments per large file
+	segSize     int64 // base bytes per segment (default 20 MiB)
+	resume      bool
 }
 
-func newDownloader(jobs int, resume bool) *downloader {
+// newDownloader takes the multi-file concurrency, the per-segment size in MiB,
+// and the max segments cap. Segments per file are computed automatically:
+// ceil(fileSize/segSize) capped at maxSegments.
+func newDownloader(jobs, maxSegments int, segSizeMiB int64, resume bool) *downloader {
 	if jobs < 1 {
 		jobs = 4
 	}
-	return &downloader{client: upstream.NewClient(), jobs: jobs, resume: resume}
+	if maxSegments < 1 {
+		maxSegments = 8
+	}
+	if segSizeMiB <= 0 {
+		segSizeMiB = 20
+	}
+	return &downloader{client: upstream.NewClient(), jobs: jobs, maxSegments: maxSegments, segSize: segSizeMiB << 20, resume: resume}
 }
 
 // partPath returns a stable temp path so an interrupted download can resume.
 func partPath(dst string) string {
 	return filepath.Join(filepath.Dir(dst), "."+filepath.Base(dst)+".part")
 }
-
-// segThreshold is the minimum file size (bytes) to attempt segmented parallel
-// download. Smaller files are fetched with a single connection.
-const segThreshold = 4 << 20 // 4 MiB
 
 // fetch one package: supports resuming from a partial download and verifies
 // size + checksum when provided.
@@ -53,8 +60,8 @@ func (d *downloader) fetch(ctx context.Context, url, dst, checksum string, size 
 	if st, err := os.Stat(part); err == nil && d.resume && !st.IsDir() {
 		have = st.Size()
 	}
-	// For large unknown resumes or fresh big files, prefer segmented parallel.
-	if have == 0 && size >= segThreshold && d.jobs > 1 {
+	// For fresh big files (>= one segment), download with segmented parallel.
+	if have == 0 && size >= d.segSize && d.maxSegments > 1 {
 		if err := d.segmentedFetch(ctx, url, part, size, checksum); err == nil {
 			return os.Rename(part, dst)
 		}
@@ -168,17 +175,19 @@ func (d *downloader) segmentedFetch(ctx context.Context, url, dst string, size i
 		return err
 	}
 
-	n := d.jobs
+	// Segment count grows with file size but is capped: ceil(size/segSize),
+	// at most maxSegments. Guarantees progress and avoids thread explosion.
+	n := int((size + d.segSize - 1) / d.segSize)
 	if n < 2 {
 		n = 2
 	}
-	if int64(n) > size {
-		n = int(size)
-		if n < 1 {
-			n = 1
-		}
+	if n > d.maxSegments {
+		n = d.maxSegments
 	}
 	segSize := size / int64(n)
+	if segSize < 1 {
+		segSize = 1
+	}
 
 	var wg sync.WaitGroup
 	errs := make([]error, n)

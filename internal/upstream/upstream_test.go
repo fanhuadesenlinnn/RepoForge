@@ -153,3 +153,20 @@ func TestDEBIndex(t *testing.T) {
 		t.Fatalf("resolve = %q", got)
 	}
 }
+
+func TestParseDEBDepsAnyQualifier(t *testing.T) {
+	deps := parseDEBDeps("python3:any (>= 3.10.5-0~), perl:any, libc6 (>= 2.35)")
+	if len(deps) != 3 {
+		t.Fatalf("deps = %d, want 3", len(deps))
+	}
+	// python3:any -> python3, version preserved
+	if deps[0].Name != "python3" || deps[0].Op != ">=" {
+		t.Fatalf("deps[0] = %+v", deps[0])
+	}
+	if deps[1].Name != "perl" {
+		t.Fatalf("deps[1] = %+v", deps[1])
+	}
+	if deps[2].Name != "libc6" {
+		t.Fatalf("deps[2] = %+v", deps[2])
+	}
+}

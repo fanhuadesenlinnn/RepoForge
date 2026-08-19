@@ -17,8 +17,9 @@ RepoForge 是一个**跨平台（Windows / Linux / macOS）**的离线 Linux 软
 ### 下载能力
 
 - **多文件并行**：多个包同时下载（`sync.concurrency`，默认 8）。
+- **单大文件智能分段**：段数按文件大小自动计算——`ceil(size/segment_threshold)` 且上限 `max_segments`。
+  例如 20 MiB 每段：40MiB→2 段、100MiB→5 段、200MiB→8 段(封顶)；≤20MiB 不分段走单连接。
 - **断点续传**：中断后从断点继续，不重下（`sync.resume: true`）。
-- **单大文件分段并行**：>4MB 的文件自动切段并发下载再合并（主流镜像均支持 HTTP Range）。
 - **增量**：已存在且校验匹配的包跳过；孤儿 `.part` 自动清理。
 
 ## 快速开始
@@ -103,8 +104,8 @@ repositories:
 - **目录**：全局 `paths.repo_dir` 定根；仓库级 `repo_dir` 可选覆盖（为该仓库内容根）；
   多架构/套件自动展开子目录，无需手写。
 - **制作方式**：配 `sync` → `repoforge sync` 整仓镜像；配 `install.packages` → `repoforge install` 按需。
-- **下载性能**：`sync.concurrency` 设并发数（默认 8）；`sync.resume: true` 开启断点续传；
-  大文件自动分段并行下载。
+- **下载性能**：`sync.concurrency` 多文件并行数（默认 8）；`sync.segment_threshold` 每段大小 MiB
+  （默认 20，段数自动算）；`sync.max_segments` 单文件分段上限（默认 8）；`sync.resume: true` 断点续传。
 - **多仓库聚合**：真实发行版常由多个子仓组成（如 CentOS 的 BaseOS + AppStream，vim 在 AppStream，
   而 glibc 等基础库在 BaseOS）。用 `upstream.sources` 聚合多个源做统一依赖求解并输出到同一目录：
 

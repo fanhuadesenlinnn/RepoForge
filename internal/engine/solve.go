@@ -16,12 +16,15 @@ type SolveOptions struct {
 
 // Solve computes the set of package locations needed to satisfy the requested
 // names, following hard dependencies (and weak deps when requested).
-// It returns the selected packages and any unresolvable dependencies.
-func Solve(ix *upstream.Index, request []string, opt SolveOptions) (map[string]upstream.Pkg, []string) {
+// It returns the selected packages and any unresolvable dependencies, split
+// into hard problems and tolerated notices (soft/conditional/virtual deps that
+// a packaged mirror may legitimately not fully resolve).
+func Solve(ix *upstream.Index, request []string, opt SolveOptions) (map[string]upstream.Pkg, []string, []string) {
 	selected := map[string]upstream.Pkg{} // by provides-name -> package
 	addedLoc := map[string]bool{}
 	var queue []upstream.DependencyEntry
 	var problems []string
+	var notices []string
 
 	archOK := func(p upstream.Pkg) bool {
 		if len(opt.Archs) == 0 {
@@ -69,7 +72,11 @@ func Solve(ix *upstream.Index, request []string, opt SolveOptions) (map[string]u
 		candidates := providers(ix, dep.Name, archOK)
 		best := chooseBest(candidates, dep, opt.Backend)
 		if best == nil {
-			problems = append(problems, fmt.Sprintf("无法满足依赖: %s", dep.String()))
+			if toleratedDep(dep, opt.Backend) {
+				notices = append(notices, fmt.Sprintf("未匹配(可忽略): %s", dep.String()))
+			} else {
+				problems = append(problems, fmt.Sprintf("无法满足依赖: %s", dep.String()))
+			}
 			continue
 		}
 		if prev, ok := selected[dep.Name]; ok && prev.Location != best.Location {
@@ -91,7 +98,30 @@ func Solve(ix *upstream.Index, request []string, opt SolveOptions) (map[string]u
 		}
 	}
 
-	return selected, dedupe(problems)
+	return selected, dedupe(problems), dedupe(notices)
+}
+
+// toleratedDep reports whether an unresolvable dependency is a soft/conditional
+// or virtual dependency that a packaged mirror may legitimately not fully
+// resolve, and should be treated as an informational notice rather than a hard
+// error.
+func toleratedDep(dep upstream.DependencyEntry, backend string) bool {
+	name := dep.Name
+	if backend == "rpm" {
+		// RPM conditional dependencies: "package if feature".
+		if strings.Contains(name, " if ") {
+			return true
+		}
+	}
+	if backend == "deb" {
+		// DEB virtual test-provides with -max/-min suffixes, e.g.
+		// python3-cffi-backend-api-max. These are build/test markers, not
+		// install-time requirements we must satisfy.
+		if strings.HasSuffix(name, "-max") || strings.HasSuffix(name, "-min") {
+			return true
+		}
+	}
+	return false
 }
 
 func dedupe(s []string) []string {
@@ -320,4 +350,10 @@ var fileProvider = map[string]string{
 	"/bin/sed":               "sed",
 	"/usr/bin/tar":           "tar",
 	"/bin/tar":               "tar",
+	"/usr/bin/file":          "file",
+	"/bin/file":              "file",
+	"/usr/bin/xargs":         "findutils",
+	"/bin/xargs":             "findutils",
+	"/usr/bin/gpg2":          "gnupg2",
+	"/bin/gpg2":              "gnupg2",
 }

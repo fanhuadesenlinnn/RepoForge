@@ -38,7 +38,7 @@ func Sync(ctx context.Context, cfg *repo.Config, ev *repo.Expanded) (*SyncResult
 
 	prev := loadState(root)
 	items, skipped := planDownloads(ix, root, prev)
-	d := newDownloader(ev.Repository.Sync.Concurrency, ev.Repository.Sync.Resume)
+	d := newDownloader(ev.Repository.Sync.Concurrency, ev.Repository.Sync.MaxSegments, ev.Repository.Sync.SegmentThreshold, ev.Repository.Sync.Resume)
 	downloaded, errs := d.runAll(ctx, items)
 
 	// persistence: update state with all current packages.

@@ -116,8 +116,15 @@ type Suite struct {
 type Sync struct {
 	Enabled      bool   `yaml:"enabled"`
 	DeletePolicy string `yaml:"delete_policy"` // keep | prune | prune-expired
-	Concurrency  int    `yaml:"concurrency"`
-	Resume       bool   `yaml:"resume"`
+	// Concurrency controls how many files download in parallel (multi-file).
+	Concurrency int `yaml:"concurrency"`
+	// SegmentThreshold is the base segment size (MiB). A single file larger
+	// than this is split into ceil(size/threshold) segments automatically,
+	// capped at MaxSegments. No per-file segment count needs to be configured.
+	SegmentThreshold int64 `yaml:"segment_threshold"`
+	// MaxSegments caps how many concurrent Range segments a single file uses.
+	MaxSegments int  `yaml:"max_segments"`
+	Resume      bool `yaml:"resume"`
 }
 
 // Install enables on-demand building (specified packages + dependency solving).

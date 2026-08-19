@@ -174,7 +174,15 @@ func parseDEBDeps(raw string) []DependencyEntry {
 			if m == nil {
 				continue
 			}
-			e := DependencyEntry{Name: m[1]}
+			name := m[1]
+			// Strip Multi-Arch qualifiers (":any", ":native", ":<arch>") so that
+			// e.g. "python3:any" resolves to the package "python3".
+			if idx := strings.Index(name, ":"); idx >= 0 {
+				if q := name[idx+1:]; q == "any" || q == "native" {
+					name = name[:idx]
+				}
+			}
+			e := DependencyEntry{Name: name}
 			if len(m) > 2 && m[2] != "" {
 				e.Op = normalizeDebOp(m[2])
 				e.Version = m[3]

@@ -18,7 +18,8 @@ type InstallResult struct {
 	Output     string
 	Selected   int
 	Downloaded int
-	Problems   []string
+	Problems   []string // hard problems — should surface as errors
+	Notices    []string // tolerated soft/virtual dep notes — informational only
 	Repodata   string
 }
 
@@ -43,7 +44,7 @@ func Install(ctx context.Context, cfg *repo.Config, ev *repo.Expanded) (*Install
 		Archs:    archList(ev.Repository),
 		WeakDeps: ev.Repository.Dependency.WeakDeps,
 	}
-	selected, problems := Solve(ix, ev.Repository.Install.Packages, opt)
+	selected, problems, notices := Solve(ix, ev.Repository.Install.Packages, opt)
 
 	// Deduplicate selected packages by location (a package may be selected under
 	// multiple provides names, e.g. glibc provides many libc.so.6 variants).
@@ -72,7 +73,7 @@ func Install(ctx context.Context, cfg *repo.Config, ev *repo.Expanded) (*Install
 			Size:     p.Size,
 		})
 	}
-	d := newDownloader(ev.Repository.Sync.Concurrency, true)
+	d := newDownloader(ev.Repository.Sync.Concurrency, ev.Repository.Sync.MaxSegments, ev.Repository.Sync.SegmentThreshold, true)
 	downloaded, errs := d.runAll(ctx, items)
 	problems = append(problems, errs...)
 
@@ -89,6 +90,7 @@ func Install(ctx context.Context, cfg *repo.Config, ev *repo.Expanded) (*Install
 		Selected:   len(subset),
 		Downloaded: downloaded,
 		Problems:   dedupe(problems),
+		Notices:    dedupe(notices),
 		Repodata:   repodata,
 	}, nil
 }

@@ -23,7 +23,7 @@ func TestSolveRPMTransitive(t *testing.T) {
 		mkPkg("glibc-common", "2.34", "1", "x86_64", "P/glibc-common.rpm", nil, nil, nil),
 		mkPkg("other-libc", "2.28", "1", "x86_64", "P/other.rpm", nil, nil, []string{"libc.so.6()(64bit)"}),
 	}}
-	selected, problems := Solve(ix, []string{"vim"}, SolveOptions{Backend: "rpm", WeakDeps: false})
+	selected, problems, _ := Solve(ix, []string{"vim"}, SolveOptions{Backend: "rpm", WeakDeps: false})
 	if len(problems) != 0 {
 		t.Fatalf("problems: %v", problems)
 	}
@@ -61,7 +61,7 @@ func TestSolveDEBVersionConstraint(t *testing.T) {
 		mkPkg("libfoo", "1.5", "", "amd64", "pool/l/libfoo15.deb", nil, nil, nil),
 		mkPkg("libfoo", "2.1", "", "amd64", "pool/l/libfoo21.deb", nil, nil, nil),
 	}}
-	selected, problems := Solve(ix, []string{"app"}, SolveOptions{Backend: "deb"})
+	selected, problems, _ := Solve(ix, []string{"app"}, SolveOptions{Backend: "deb"})
 	if len(problems) != 0 {
 		t.Fatalf("problems: %v", problems)
 	}
@@ -84,7 +84,7 @@ func TestSolvePicksNewestVersion(t *testing.T) {
 		mkPkg("nginx", "1.20", "1", "x86_64", "P/nginx-1.20.rpm", nil, nil, nil),
 		mkPkg("nginx", "1.24", "1", "x86_64", "P/nginx-1.24.rpm", nil, nil, nil),
 	}}
-	selected, problems := Solve(ix, []string{"nginx"}, SolveOptions{Backend: "rpm"})
+	selected, problems, _ := Solve(ix, []string{"nginx"}, SolveOptions{Backend: "rpm"})
 	if len(problems) != 0 {
 		t.Fatalf("problems: %v", problems)
 	}
@@ -134,5 +134,39 @@ func TestCompareDEB(t *testing.T) {
 		if got != c.want {
 			t.Errorf("compareDEB(%q,%q) = %d, want %d", c.a, c.b, got, c.want)
 		}
+	}
+}
+
+func TestToleratedDep(t *testing.T) {
+	cases := []struct {
+		dep     upstream.DependencyEntry
+		backend string
+		want    bool
+	}{
+		{upstream.DependencyEntry{Name: "annobin if gcc"}, "rpm", true},
+		{upstream.DependencyEntry{Name: "python3-cffi-backend-api-max"}, "deb", true},
+		{upstream.DependencyEntry{Name: "libc.so.6"}, "rpm", false},
+		{upstream.DependencyEntry{Name: "libc6"}, "deb", false},
+	}
+	for _, c := range cases {
+		if got := toleratedDep(c.dep, c.backend); got != c.want {
+			t.Errorf("toleratedDep(%q,%s) = %v, want %v", c.dep.Name, c.backend, got, c.want)
+		}
+	}
+}
+
+func TestSolveNoticesForConditional(t *testing.T) {
+	// A package requiring "annobin if gcc" (conditional) an "annobin" that doesn't exist.
+	ix := &upstream.Index{Backend: "rpm", Packages: []upstream.Pkg{
+		mkPkg("gcc", "10", "1", "x86_64", "P/gcc.rpm",
+			[]upstream.DependencyEntry{{Name: "annobin if gcc"}}, nil, nil),
+		mkPkg("gcc", "10", "1", "x86_64", "P/gcc2.rpm", nil, nil, nil),
+	}}
+	_, problems, notices := Solve(ix, []string{"gcc"}, SolveOptions{Backend: "rpm"})
+	if len(problems) != 0 {
+		t.Fatalf("problems should be empty for conditional dep, got %v", problems)
+	}
+	if len(notices) != 1 {
+		t.Fatalf("notices = %v, want 1", notices)
 	}
 }

@@ -1,0 +1,99 @@
+# RepoForge 单文件配置（schema v2）
+# 所有内容都在这一个文件里：全局运行环境 + 共享变量 + 多个仓库定义。
+schema_version: 2
+
+# 全局共享变量：任何仓库的 upstream.vars 未声明同名变量时回退到这里。
+vars:
+  basearch:
+    - x86_64
+  releasever:
+    - "9"
+
+app:
+  name: repoforge
+  log_level: info
+
+paths:
+  home_dir: auto
+  repo_dir: ${home}/repos
+  cache_dir: ${home}/cache
+  client_dir: ${home}/client
+  log_dir: ${home}/logs
+
+server:
+  listen: 0.0.0.0:8080
+  root: ${home}/repos
+  public_url: auto
+  readonly: true
+  systemd:
+    enabled: true
+    service_name: repoforge-server
+
+repositories:
+  # ── RPM 全量镜像：多架构自动展开成独立子目录 ────────────
+  - name: rocky-9
+    backend: rpm
+    upstream:
+      url: http://mirrors.rockylinux.org/pub/rocky/$releasever/BaseOS/$basearch/os/
+      vars:
+        - name: releasever
+          value: "9"
+        - name: basearch
+          values: [x86_64, aarch64]
+      verify: sha256
+    sync:
+      enabled: true
+      delete_policy: keep
+      concurrency: 8     # 并行下载数（多个包同时拉）
+      resume: true       # 断点续传（中断后从断点继续）
+    # output = ${repo_dir}/rocky-9/{x86_64,aarch64}/（多架构自动展开）
+    # 大文件（>4MB）会自动分段并行下载加速。
+
+  # ── RPM 按需制作：只下载指定软件 + 自动依赖求解 ────────
+  - name: rocky-9-install
+    backend: rpm
+    upstream:
+      url: http://mirrors.rockylinux.org/pub/rocky/$releasever/BaseOS/$basearch/os/
+      vars:
+        - name: releasever
+          value: "9"
+        - name: basearch
+          value: x86_64
+    install:
+      packages: [vim, curl, nginx]
+
+  # ── DEB 多套件/组件/架构 ──────────────────────────────
+  - name: debian-12
+    backend: deb
+    upstream:
+      url: https://deb.debian.org/debian
+      suites:
+        - suite: bookworm
+          components: [main, contrib]
+        - suite: bookworm-updates
+          components: [main]
+      arch: [amd64, all]
+    sync:
+      enabled: true
+    install:
+      packages: [vim, htop]
+
+  # ── RPM 多仓库聚合：BaseOS + AppStream 统一求依赖 ─────────
+  # （vim 本体的 AppStream，基础库 glibc 等在 BaseOS）
+  - name: centos-8-vault
+    backend: rpm
+    upstream:
+      sources:
+        - url: http://mirrors.aliyun.com/centos-vault/8.5.2111/BaseOS/$basearch/os/
+          vars:
+            - name: basearch
+              value: x86_64
+        - url: http://mirrors.aliyun.com/centos-vault/8.5.2111/AppStream/$basearch/os/
+          vars:
+            - name: basearch
+              value: x86_64
+      verify: sha256
+    install:
+      packages: [vim-enhanced]
+    dependency:
+      weak_deps: false

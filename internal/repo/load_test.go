@@ -1,0 +1,196 @@
+package repo
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+func writeConfig(t *testing.T, home string) {
+	t.Helper()
+	content := `schema_version: 2
+vars:
+  releasever: [9]
+paths:
+  home_dir: auto
+  repo_dir: ${home}/repos
+repositories:
+  - name: rocky-9
+    backend: rpm
+    upstream:
+      url: http://mirrors.rockylinux.org/pub/rocky/$releasever/BaseOS/$basearch/os/
+      vars:
+        - name: basearch
+          values: [x86_64, aarch64]
+    sync:
+      enabled: true
+`
+	if err := os.MkdirAll(filepath.Join(home, "config"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, "config", "repo.yaml"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestLoadAndExpand(t *testing.T) {
+	home := t.TempDir()
+	writeConfig(t, home)
+	cfg, err := Load(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := &cfg.Repositories[0]
+	if cfg.Paths.RepoDir != filepath.Join(home, "repos") {
+		t.Fatalf("RepoDir = %q", cfg.Paths.RepoDir)
+	}
+	variants, err := Expand(cfg, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(variants) != 2 {
+		t.Fatalf("expected 2 variants, got %d", len(variants))
+	}
+	want := map[string]bool{
+		"http://mirrors.rockylinux.org/pub/rocky/9/BaseOS/aarch64/os/": true,
+		"http://mirrors.rockylinux.org/pub/rocky/9/BaseOS/x86_64/os/":  true,
+	}
+	for i, v := range variants {
+		if !want[v.URL] {
+			t.Errorf("variant %d URL = %q, unexpected", i, v.URL)
+		}
+		root := v.ContentRoot(cfg)
+		if filepath.Base(root) == "repos" {
+			t.Errorf("variant %d content root did not add arch subdir: %q", i, root)
+		}
+	}
+}
+
+func TestSingleValueNoSubdir(t *testing.T) {
+	home := t.TempDir()
+	content := `schema_version: 2
+paths:
+  repo_dir: ${home}/repos
+repositories:
+  - name: centos
+    backend: rpm
+    upstream:
+      url: http://x/centos/$basearch/os/
+      vars:
+        - name: basearch
+          value: x86_64
+    sync:
+      enabled: true
+`
+	if err := os.MkdirAll(filepath.Join(home, "config"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, "config", "repo.yaml"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := &cfg.Repositories[0]
+	variants, err := Expand(cfg, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(variants) != 1 {
+		t.Fatalf("expected 1 variant, got %d", len(variants))
+	}
+	if variants[0].URL != "http://x/centos/x86_64/os/" {
+		t.Fatalf("URL = %q", variants[0].URL)
+	}
+	// Single value -> content root is exactly repo_dir/<name> (no arch subdir).
+	want := filepath.Join(home, "repos", "centos")
+	if got := variants[0].ContentRoot(cfg); got != want {
+		t.Fatalf("ContentRoot = %q, want %q", got, want)
+	}
+}
+
+func TestRepoDirOverride(t *testing.T) {
+	home := t.TempDir()
+	content := `schema_version: 2
+paths:
+  repo_dir: ${home}/repos
+repositories:
+  - name: special
+    repo_dir: /data/special
+    backend: rpm
+    upstream:
+      url: http://x/special/$basearch/os/
+      vars:
+        - name: basearch
+          values: [x86_64, aarch64]
+    sync:
+      enabled: true
+`
+	if err := os.MkdirAll(filepath.Join(home, "config"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, "config", "repo.yaml"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := &cfg.Repositories[0]
+	variants, _ := Expand(cfg, r)
+	if got := variants[0].ContentRoot(cfg); !filepath.HasPrefix(got, "/data/special") {
+		t.Fatalf("ContentRoot = %q, want under /data/special", got)
+	}
+}
+
+func TestExpandMultiSource(t *testing.T) {
+	home := t.TempDir()
+	content := `schema_version: 2
+paths:
+  repo_dir: ${home}/repos
+repositories:
+  - name: centos8
+    backend: rpm
+    upstream:
+      sources:
+        - url: http://mirrors/baseos/$basearch/os/
+          vars:
+            - name: basearch
+              value: x86_64
+        - url: http://mirrors/appstream/$basearch/os/
+          vars:
+            - name: basearch
+              value: x86_64
+    install:
+      packages: [vim]
+`
+	if err := os.MkdirAll(filepath.Join(home, "config"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, "config", "repo.yaml"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := &cfg.Repositories[0]
+	variants, err := Expand(cfg, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(variants) != 1 {
+		t.Fatalf("expected 1 variant, got %d", len(variants))
+	}
+	ev := variants[0]
+	if len(ev.Sources) != 2 {
+		t.Fatalf("expected 2 sources, got %d", len(ev.Sources))
+	}
+	if ev.Sources[0].URL != "http://mirrors/baseos/x86_64/os/" {
+		t.Fatalf("source0 URL = %q", ev.Sources[0].URL)
+	}
+	if ev.Sources[1].URL != "http://mirrors/appstream/x86_64/os/" {
+		t.Fatalf("source1 URL = %q", ev.Sources[1].URL)
+	}
+}

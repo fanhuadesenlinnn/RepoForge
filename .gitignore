@@ -2,3 +2,6 @@
 /bin/
 /dist/
 /coverage.out
+/.gocache/
+/.gomodcache/
+/scripts/gdev.sh

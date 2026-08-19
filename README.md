@@ -1,224 +1,158 @@
 # RepoForge
 
-RepoForge 是一个用于离线、内网和隔离网络环境的 Linux 软件源构建与只读分发工具。
+RepoForge 是一个**跨平台（Windows / Linux / macOS）**的离线 Linux 软件源构建与分发工具。
 
-它把配置、软件包、索引、客户端配置和可执行文件放在同一个目录中。在线机器制作完成后，将整个目录复制到离线机器即可使用。
+它用**单文件配置 `repo.yaml`** 描述一切：多个仓库、上游 URL（支持变量占位符和多值架构）、制作方式
+（全量镜像 `sync` / 按需制作 `install`）。引擎**纯 Go 实现，不依赖本机 dnf/apt/createrepo_c**，
+因此可以在任意机器上制作面向任意发行版的离线 yum/apt 源。
 
-## 支持范围
+## 核心能力
 
-- RPM 系统：使用 `dnf` 或 `yum` 下载依赖，使用 `createrepo_c` 生成索引。
-- RPM 系统升级源：使用 `dnf upgrade --downloadonly` 或 `yum update --downloadonly` 下载当前系统升级所需 RPM 包，并使用 `createrepo_c` 生成索引。
-- DEB 系统：使用 `apt-get` 下载依赖，使用 `dpkg-scanpackages` 生成索引。
-- HTTP 分发：使用 Go 标准库提供仅允许 GET/HEAD 的文件服务。
-- 服务管理：使用 systemd 安装、启停和查看 HTTP 服务。
+- **`sync`**：全量镜像上游仓库（整仓拉取、增量、校验）。
+- **`install`**：按需制作离线源——只下载指定软件及其依赖（RPM 与 DEB **自动依赖求解**）。
+- **`client`**：按 `repo.yaml` 生成客户端 yum/apt 源配置。
+- **`use`**：启用/禁用本机 file:// 软件源。
+- 单文件配置、多仓库、多架构自动展开、变量占位符。
 
-制作离线源时，应使用与目标机器相同的发行版、版本和架构。
-制作系统升级离线源时，应使用与目标机器相同发行版、版本、架构、已安装包状态尽量一致的在线机器。
+### 下载能力
+
+- **多文件并行**：多个包同时下载（`sync.concurrency`，默认 8）。
+- **断点续传**：中断后从断点继续，不重下（`sync.resume: true`）。
+- **单大文件分段并行**：>4MB 的文件自动切段并发下载再合并（主流镜像均支持 HTTP Range）。
+- **增量**：已存在且校验匹配的包跳过；孤儿 `.part` 自动清理。
 
 ## 快速开始
 
-从 [Releases](https://github.com/fanhuadesenlinnn/RepoForge/releases) 下载对应架构的压缩包，并解压到 `/opt`：
+1. 放置 `repo.yaml`（参考 `repo.example.yaml`），填写你想同步/制作的仓库。
+2. 运行：
 
 ```bash
-sudo tar -C /opt -xzf repoforge_v0.3.0_linux_amd64.tar.gz
-sudo /opt/repoforge/bin/repoforge init
+# 全量镜像配置里启用了 sync 的所有仓库
+repoforge sync
+
+# 只镜像某个仓库
+repoforge sync --repo rocky-9
+
+# 按需制作离线源（自动求解依赖）
+repoforge install --repo rocky-9-install
+
+# 命令行临时追加要装的软件
+repoforge install vim curl --repo rocky-9-install
+
+# 生成客户端源配置
+repoforge client
+
+# 本机启用 file:// 软件源（Linux，需 root）
+sudo repoforge use
 ```
 
-编辑软件包列表（添加你需要的包）：
-
-```bash
-sudo vi /opt/repoforge/config/packages.yaml
-```
-
-在在线机器制作软件源（自动匹配当前系统 profile）：
-
-```bash
-/opt/repoforge/bin/repoforge make
-```
-
-在在线机器制作当前系统升级离线源：
-
-```bash
-/opt/repoforge/bin/repoforge make-upgrade
-```
-
-查看本地软件源中已有的软件包：
-
-```bash
-/opt/repoforge/bin/repoforge list
-```
-
-将整个目录复制到离线机器：
-
-```bash
-scp -r /opt/repoforge root@offline-host:/opt/repoforge
-```
-
-在离线机器启用本机软件源：
-
-```bash
-sudo /opt/repoforge/bin/repoforge use
-```
-
-将离线机器作为局域网软件源：
-
-```bash
-sudo /opt/repoforge/bin/repoforge server enable
-/opt/repoforge/bin/repoforge server status
-```
-
-## 常用命令
-
-```text
-repoforge init [--force]                 初始化目录和默认配置
-repoforge check                          检查环境、匹配 profile、仓库状态
-repoforge make                           下载包及依赖并生成软件源索引
-repoforge make --profile NAME            指定 profile 制作
-repoforge make-upgrade                   下载当前系统升级所需 RPM 包并生成软件源索引
-repoforge make-upgrade --profile NAME    指定 profile 制作系统升级离线源
-repoforge list                           列出本地软件源中的软件包
-repoforge list --profile NAME            指定 profile 列出软件包
-repoforge use                            启用本机 file:// 软件源
-repoforge use --disable                  禁用本机软件源
-repoforge use --disable --remove         禁用并删除配置文件
-repoforge server start                   前台启动只读 HTTP 服务
-repoforge server enable                  安装并启动 systemd 服务
-repoforge server stop                    停止 systemd 服务
-repoforge server disable                 禁用并删除 systemd 服务
-repoforge server status                  查看服务和可用 profile
-```
-
-## 运行目录
-
-```text
-/opt/repoforge/
-├── bin/repoforge
-├── config/
-│   ├── config.yaml
-│   ├── packages.yaml
-│   ├── profiles/
-│   └── templates/
-├── repos/
-├── cache/
-├── client/
-└── logs/
-```
-
-`repoforge init` 可重复执行。默认不会覆盖已有配置；只有 `repoforge init --force` 会更新受管的默认配置和模板。已有 `repos/` 软件包不会被删除。
-
-## 系统修改
-
-以下命令需要 root 权限：
-
-- `repoforge use`：写入 profile 中配置的 yum/dnf 或 apt 源文件。
-- `repoforge server enable`：写入 systemd unit 并启用服务。
-- `repoforge server stop`、`repoforge server disable`：管理 systemd 服务。
-
-RepoForge 不修改其他软件源配置。禁用或删除时只处理自己管理的源文件和 systemd unit。
-
-## 从已有 RPM 目录补齐依赖
-
-如果已有一批 rpm 包，可以在 profile 中配置：
+## 单文件配置示例（`repo.yaml`）
 
 ```yaml
-input:
-  package_dirs:
-    - /root/input-rpms
-  recursive: false
+schema_version: 2
+
+vars:                        # 全局共享变量（仓库内可覆盖）
+  basearch: [x86_64]
+
+paths:
+  repo_dir: ${home}/repos    # 全局仓库根（唯一）
+
+repositories:
+  # RPM 全量镜像：多架构自动展开成独立子目录
+  - name: rocky-9
+    backend: rpm
+    upstream:
+      url: http://mirrors.rockylinux.org/pub/rocky/$releasever/BaseOS/$basearch/os/
+      vars:
+        - name: releasever
+          value: "9"
+        - name: basearch
+          values: [x86_64, aarch64]   # 多值 → 每个架构一个子目录
+    sync:
+      enabled: true
+      delete_policy: keep
+
+  # RPM 按需制作：只下载指定软件 + 自动依赖求解
+  - name: rocky-9-install
+    backend: rpm
+    upstream:
+      url: http://mirrors.rockylinux.org/pub/rocky/$releasever/BaseOS/$basearch/os/
+      vars:
+        - name: basearch
+          value: x86_64
+    install:
+      packages: [vim, curl, nginx]
+
+  # DEB 多套件/组件/架构
+  - name: debian-12
+    backend: deb
+    upstream:
+      url: https://deb.debian.org/debian
+      suites:
+        - suite: bookworm
+          components: [main, contrib]
+      arch: [amd64, all]
+    install:
+      packages: [vim, htop]
 ```
 
-然后执行：
+### 关键配置点
 
-```bash
-repoforge make --profile kylin-v10-sp3-x86_64
+- **变量**：`value` 单值（直接替换 URL 占位符 `$名字`）；`values` 多值（笛卡尔展开成多组）。
+  顶层 `vars` 共享，`upstream.vars` 局部可覆盖。
+- **目录**：全局 `paths.repo_dir` 定根；仓库级 `repo_dir` 可选覆盖（为该仓库内容根）；
+  多架构/套件自动展开子目录，无需手写。
+- **制作方式**：配 `sync` → `repoforge sync` 整仓镜像；配 `install.packages` → `repoforge install` 按需。
+- **下载性能**：`sync.concurrency` 设并发数（默认 8）；`sync.resume: true` 开启断点续传；
+  大文件自动分段并行下载。
+- **多仓库聚合**：真实发行版常由多个子仓组成（如 CentOS 的 BaseOS + AppStream，vim 在 AppStream，
+  而 glibc 等基础库在 BaseOS）。用 `upstream.sources` 聚合多个源做统一依赖求解并输出到同一目录：
+
+```yaml
+  - name: centos8
+    backend: rpm
+    upstream:
+      sources:
+        - url: http://mirrors.aliyun.com/centos-vault/8.5.2111/BaseOS/$basearch/os/
+          vars: [{ name: basearch, value: x86_64 }]
+        - url: http://mirrors.aliyun.com/centos-vault/8.5.2111/AppStream/$basearch/os/
+          vars: [{ name: basearch, value: x86_64 }]
+      verify: sha256
+    install:
+      packages: [vim-enhanced]
+    dependency:
+      weak_deps: false
 ```
 
-RepoForge 会：
+## 依赖求解
 
-1. 扫描输入目录中的 rpm；
-2. 复制到当前 profile 的软件源目录；
-3. 调用 dnf/yum 下载这些 rpm 缺失的依赖；
-4. 生成 createrepo_c 索引。
+`install` 会从上游仓库元数据中解析依赖关系（RPM 的 Requires/Provides、DEB 的 Depends/Provides），
+传递求解并选择合适版本，生成可离线使用的 repodata（RPM 生成 `repomd.xml` + `primary.xml.gz`，
+DEB 生成 `Packages`）。全程不调用本机包管理器。
 
-## 制作系统升级离线源
+内部已处理：
+- RPM 的库能力匹配（`libc.so.6(GLIBC_2.28)(64bit)` 这类 soname/符号能力，按基础名 + 版本近似匹配）。
+- 文件路径依赖（`/usr/bin/bash`、`/sbin/ldconfig` 等，映射到提供它们的包）。
+- 多架构过滤（默认 x86_64 + noarch，避免误拉 multilib i686）。
+- 多仓库聚合（`upstream.sources`）。
 
-RPM 系统可以使用 `make-upgrade` 下载当前系统升级所需 RPM 包：
+## 架构
 
-```bash
-repoforge make-upgrade --profile kylin-v10-sp3-x86_64
 ```
-
-RepoForge 会：
-
-1. 使用当前系统已安装包状态计算可升级包；
-2. 调用 `dnf upgrade --downloadonly` 或 `yum update --downloadonly` 下载 RPM 包；
-3. 下载目录使用当前 profile 的 `repository.package_dir`；
-4. 调用 `createrepo_c --update` 生成 yum/dnf 软件源索引；
-5. 校验 `repodata/repomd.xml`。
-
-注意：`make-upgrade` 不使用 `--installroot`。如果在线制作机与离线目标机已安装包状态差异较大，生成的升级源可能无法完整覆盖目标机升级需求。
-
-## 查看本地软件源软件包
-
-可以使用 `list` 查看当前 profile 软件源目录中的软件包：
-
-```bash
-repoforge list --profile kylin-v10-sp3-x86_64
+repo.yaml
+ ├─ internal/repo     单文件配置模型 / loader / 变量展开 / 目录推导
+ ├─ internal/upstream 上游元数据解析（RPM repomd→primary；DEB suites→Packages）
+ ├─ internal/engine   制作引擎（下载/校验/增量/repodata/依赖求解），sync + install
+ ├─ cmd               命令层（sync / install / client / use / server ...）
+ └─ 复用基础设施      home / fileutil / render / privilege
 ```
-
-RPM backend 会优先使用 `rpm -qp` 读取 RPM 包头，并输出包名、版本、发布号、架构、大小和文件名。DEB backend 当前按 deb 文件名和大小输出。
-
-## 客户端使用
-
-启用 HTTP 服务后，客户端配置会生成到 `/opt/repoforge/client/`。
-
-RPM 客户端：
-
-```bash
-sudo cp /opt/repoforge/client/repoforge-kylin.repo /etc/yum.repos.d/
-sudo dnf makecache --disablerepo="*" --enablerepo="repoforge-lan"
-sudo dnf install --disablerepo="*" --enablerepo="repoforge-lan" vim curl
-```
-
-DEB 客户端：
-
-```bash
-sudo cp /opt/repoforge/client/repoforge-debian.list /etc/apt/sources.list.d/
-sudo apt-get update
-sudo apt-get install vim curl
-```
-
-## 故障排查
-
-先执行只读检查：
-
-```bash
-/opt/repoforge/bin/repoforge check --profile debian-12-amd64
-```
-
-查看服务状态和局域网地址：
-
-```bash
-/opt/repoforge/bin/repoforge server status
-sudo systemctl status repoforge-server
-```
-
-端口占用时：
-
-```bash
-ss -lntp | grep 8080
-```
-
-也可以修改 `/opt/repoforge/config/config.yaml` 中的 `server.listen` 和 `server.public_url`。
 
 ## 开发
 
-需要 Go 1.23 或更高版本：
+需要 Go 1.23+（本仓库附 `scripts/gdev.sh` 辅助脚本，使用可用的工具链与可写缓存）：
 
 ```bash
-go test ./...
-go vet ./...
-go build -o bin/repoforge .
+./scripts/gdev.sh test ./...
+./scripts/gdev.sh vet ./...
+./scripts/gdev.sh build -o bin/repoforge .
 ```
-
-项目的详细实现计划仅保留在源码仓库中，不随发布包分发。

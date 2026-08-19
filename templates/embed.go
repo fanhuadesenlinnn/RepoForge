@@ -17,6 +17,7 @@ func Assets() []Asset {
 	return []Asset{
 		{Source: "config.yaml", Destination: "config/config.yaml", Mode: 0o644},
 		{Source: "packages.yaml", Destination: "config/packages.yaml", Mode: 0o644},
+		{Source: "repo.yaml", Destination: "config/repo.yaml", Mode: 0o644},
 		// RPM profiles
 		{Source: "profiles/kylin-v10-sp3-x86_64.yaml", Destination: "config/profiles/kylin-v10-sp3-x86_64.yaml", Mode: 0o644},
 		{Source: "profiles/kylin-v10-sp3-aarch64.yaml", Destination: "config/profiles/kylin-v10-sp3-aarch64.yaml", Mode: 0o644},

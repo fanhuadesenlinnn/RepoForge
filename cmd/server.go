@@ -7,10 +7,11 @@ import (
 	"path/filepath"
 	"syscall"
 
-	"github.com/fanhuadesenlinnn/RepoForge/internal/config"
+	oldconfig "github.com/fanhuadesenlinnn/RepoForge/internal/config"
 	"github.com/fanhuadesenlinnn/RepoForge/internal/executor"
 	"github.com/fanhuadesenlinnn/RepoForge/internal/home"
 	"github.com/fanhuadesenlinnn/RepoForge/internal/privilege"
+	"github.com/fanhuadesenlinnn/RepoForge/internal/repo"
 	"github.com/fanhuadesenlinnn/RepoForge/internal/server"
 	"github.com/spf13/cobra"
 )
@@ -28,6 +29,46 @@ func newServerCommand() *cobra.Command {
 		newServerStatusCommand(),
 	)
 	return command
+}
+
+// serverAdapter maps the new repo.Config onto the legacy server config consumed
+// by the reusable internal/server sub-package.
+func serverAdapter(c *repo.Config) *oldconfig.Config {
+	return &oldconfig.Config{
+		Paths: oldconfig.PathsConfig{
+			HomeDir:     c.Paths.HomeDir,
+			RepoDir:     c.Paths.RepoDir,
+			CacheDir:    c.Paths.CacheDir,
+			ClientDir:   c.Paths.ClientDir,
+			LogDir:      c.Paths.LogDir,
+			TemplateDir: c.Paths.TemplateDir,
+		},
+		Server: oldconfig.ServerConfig{
+			Listen:           c.Server.Listen,
+			Root:             c.Server.Root,
+			PublicURL:        c.Server.PublicURL,
+			Readonly:         c.Server.Readonly,
+			DirectoryListing: false,
+			Systemd: oldconfig.SystemdConfig{
+				Enabled:     c.Server.Systemd.Enabled,
+				ServiceName: c.Server.Systemd.ServiceName,
+				ServiceFile: c.Server.Systemd.ServiceFile,
+				Restart:     c.Server.Systemd.Restart,
+			},
+		},
+	}
+}
+
+func loadServerConfig() (*repo.Config, *oldconfig.Config, error) {
+	homeDir, err := home.Detect(false)
+	if err != nil {
+		return nil, nil, err
+	}
+	cfg, err := repo.Load(homeDir)
+	if err != nil {
+		return nil, nil, err
+	}
+	return cfg, serverAdapter(cfg), nil
 }
 
 func newServerStartCommand() *cobra.Command {
@@ -57,7 +98,7 @@ func newServerEnableCommand() *cobra.Command {
 			if err := privilege.RequireRoot("server enable 需要写入 systemd 服务目录", "sudo repoforge server enable"); err != nil {
 				return err
 			}
-			homeDir, cfg, err := loadServerConfig()
+			rcfg, cfg, err := loadServerConfig()
 			if err != nil {
 				return err
 			}
@@ -80,10 +121,10 @@ func newServerEnableCommand() *cobra.Command {
 			if len(candidates) > 1 {
 				fmt.Fprintf(command.OutOrStdout(), "[WARN] 检测到多个 IPv4 地址 %v，客户端配置使用 %s\n", candidates, publicURL)
 			}
-			if err := generateClientRepos(homeDir, cfg, publicURL); err != nil {
+			if err := generateClient(rcfg); err != nil {
 				return err
 			}
-			fmt.Fprintf(command.OutOrStdout(), "HTTP 服务已启用：%s\n客户端配置目录：%s\n", publicURL, cfg.Paths.ClientDir)
+			fmt.Fprintf(command.OutOrStdout(), "HTTP 服务已启用：%s\n客户端配置目录：%s\n", publicURL, rcfg.Paths.ClientDir)
 			return nil
 		},
 	}
@@ -139,17 +180,13 @@ func newServerStatusCommand() *cobra.Command {
 		Short: "查看 HTTP 服务状态",
 		Args:  noArgs,
 		RunE: func(command *cobra.Command, _ []string) error {
-			homeDir, cfg, err := loadServerConfig()
+			rcfg, cfg, err := loadServerConfig()
 			if err != nil {
 				return err
 			}
 			publicURL, candidates, publicErr := server.ResolvePublicURL(cfg.Server)
 			if publicErr != nil {
 				publicURL = "无法判断：" + publicErr.Error()
-			}
-			profiles, err := config.LoadProfiles(homeDir)
-			if err != nil {
-				return err
 			}
 			fmt.Fprintf(command.OutOrStdout(), "服务状态：%s\n监听地址：%s\n软件源根目录：%s\n局域网访问 URL：%s\n",
 				server.NewManager(executor.New(false)).Status(command.Context(), cfg),
@@ -160,53 +197,29 @@ func newServerStatusCommand() *cobra.Command {
 			if len(candidates) > 1 {
 				fmt.Fprintf(command.OutOrStdout(), "候选 IPv4：%v\n", candidates)
 			}
-			fmt.Fprintln(command.OutOrStdout(), "当前可用 profile：")
+			fmt.Fprintln(command.OutOrStdout(), "当前可用 repository：")
 			available := 0
-			for _, profile := range profiles {
-				if !repositoryAvailable(profile) {
+			for i := range rcfg.Repositories {
+				r := &rcfg.Repositories[i]
+				root := rcfg.ContentRoot(r)
+				if !contentRootAvailable(r.Backend, root) {
 					continue
 				}
 				available++
-				fmt.Fprintf(command.OutOrStdout(), "  - %s，客户端配置：%s\n", profile.Profile, profile.ClientRepo.Output)
+				fmt.Fprintf(command.OutOrStdout(), "  - %s，根目录：%s\n", r.Name, root)
 			}
 			if available == 0 {
-				fmt.Fprintln(command.OutOrStdout(), "  （无，请先执行 repoforge make）")
+				fmt.Fprintln(command.OutOrStdout(), "  （无，请先执行 repoforge sync / install）")
 			}
 			return nil
 		},
 	}
 }
 
-func loadServerConfig() (string, *config.Config, error) {
-	homeDir, err := home.Detect(false)
-	if err != nil {
-		return "", nil, err
-	}
-	cfg, err := config.Load(homeDir)
-	return homeDir, cfg, err
-}
-
-func generateClientRepos(homeDir string, cfg *config.Config, publicURL string) error {
-	profiles, err := config.LoadProfiles(homeDir)
-	if err != nil {
-		return err
-	}
-	for _, profile := range profiles {
-		selected, err := selectBackend(profile.Backend, executor.New(false))
-		if err != nil {
-			return err
-		}
-		if err := selected.GenerateClientRepo(cfg, profile, publicURL); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func repositoryAvailable(profile *config.ProfileConfig) bool {
-	index := filepath.Join(profile.Repository.PackageDir, "Packages.gz")
-	if profile.Backend == "rpm" {
-		index = filepath.Join(profile.Repository.PackageDir, "repodata", "repomd.xml")
+func contentRootAvailable(backend, root string) bool {
+	index := filepath.Join(root, "Packages")
+	if backend == "rpm" {
+		index = filepath.Join(root, "repodata", "repomd.xml")
 	}
 	_, err := os.Stat(index)
 	return err == nil

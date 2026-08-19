@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -48,7 +49,7 @@ func TestResume(t *testing.T) {
 	d := newDownloader(2, repo.SegmentMode(8), 20, true)
 
 	// First call (no partial) should do a full request.
-	if err := d.fetch(t.Context(), srv.URL, dst, checksum, int64(len(content))); err != nil {
+	if err := d.fetch(context.Background(), srv.URL, dst, checksum, int64(len(content))); err != nil {
 		t.Fatalf("first fetch: %v", err)
 	}
 	full := atomic.LoadInt64(&fullReqs)
@@ -60,7 +61,7 @@ func TestResume(t *testing.T) {
 	// Simulate a partial download: write half the file to .part, then fetch again.
 	os.MkdirAll(filepath.Dir(dst), 0o755)
 	os.WriteFile(part, content[:500], 0o644)
-	if err := d.fetch(t.Context(), srv.URL, dst, checksum, int64(len(content))); err != nil {
+	if err := d.fetch(context.Background(), srv.URL, dst, checksum, int64(len(content))); err != nil {
 		t.Fatalf("resume fetch: %v", err)
 	}
 	rr := atomic.LoadInt64(&rangeReqs)

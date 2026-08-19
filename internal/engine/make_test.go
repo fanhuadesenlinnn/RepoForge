@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -31,7 +32,7 @@ func TestMakeInputCopy(t *testing.T) {
 	cfg := loadConfigForMake(t, home, content)
 	r := &cfg.Repositories[0]
 	variants, _ := repo.Expand(cfg, r)
-	res, err := Make(t.Context(), cfg, &variants[0])
+	res, err := Make(context.Background(), cfg, &variants[0])
 	if err != nil {
 		t.Fatalf("make: %v", err)
 	}
@@ -83,7 +84,7 @@ func TestMakeCombinedInputs(t *testing.T) {
 	cfg := loadConfigForMake(t, home, content)
 	r := &cfg.Repositories[0]
 	variants, _ := repo.Expand(cfg, r)
-	res, err := Make(t.Context(), cfg, &variants[0])
+	res, err := Make(context.Background(), cfg, &variants[0])
 	if err != nil {
 		t.Fatalf("make: %v", err)
 	}

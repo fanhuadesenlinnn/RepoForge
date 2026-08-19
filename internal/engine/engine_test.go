@@ -3,6 +3,7 @@ package engine
 import (
 	"bytes"
 	"compress/gzip"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -142,7 +143,7 @@ repositories:
 	cfg := loadConfig(t, home, content)
 	r := &cfg.Repositories[0]
 	variants, _ := repo.Expand(cfg, r)
-	result, err := Sync(t.Context(), cfg, &variants[0])
+	result, err := Sync(context.Background(), cfg, &variants[0])
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -171,7 +172,7 @@ repositories:
 		t.Fatalf("primary missing provides: %s", primary)
 	}
 	// incremental: second run should skip all
-	result2, _ := Sync(t.Context(), cfg, &variants[0])
+	result2, _ := Sync(context.Background(), cfg, &variants[0])
 	if result2.Skipped != 3 {
 		t.Fatalf("second run skipped = %d, want 3", result2.Skipped)
 	}
@@ -195,7 +196,7 @@ repositories:
 	cfg := loadConfig(t, home, content)
 	r := &cfg.Repositories[0]
 	variants, _ := repo.Expand(cfg, r)
-	res, err := Make(t.Context(), cfg, &variants[0])
+	res, err := Make(context.Background(), cfg, &variants[0])
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -239,7 +240,7 @@ repositories:
 		{Name: "vim", Epoch: "0", Version: "8.1", Release: "1", Arch: "x86_64"},
 		{Name: "glibc", Epoch: "0", Version: "2.34", Release: "1", Arch: "x86_64"}, // same as upstream
 	}
-	res, err := MakeUpgrade(t.Context(), cfg, &variants[0], installed)
+	res, err := MakeUpgrade(context.Background(), cfg, &variants[0], installed)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -315,7 +316,7 @@ repositories:
 	cfg := loadConfig(t, home, content)
 	r := &cfg.Repositories[0]
 	variants, _ := repo.Expand(cfg, r)
-	res, err := Make(t.Context(), cfg, &variants[0])
+	res, err := Make(context.Background(), cfg, &variants[0])
 	if err != nil {
 		t.Fatal(err)
 	}

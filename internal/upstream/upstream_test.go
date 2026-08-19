@@ -3,6 +3,7 @@ package upstream
 import (
 	"bytes"
 	"compress/gzip"
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -57,7 +58,7 @@ func TestRPMIndex(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	ix, err := RPMIndex(t.Context(), srv.URL)
+	ix, err := RPMIndex(context.Background(), srv.URL)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +121,7 @@ func TestDEBIndex(t *testing.T) {
 			{Name: "bookworm", Components: []string{"main"}, Archs: []string{"amd64"}},
 		},
 	}
-	ix, err := DEBIndex(t.Context(), spec)
+	ix, err := DEBIndex(context.Background(), spec)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,7 +208,7 @@ func TestRPMIndexMergesFilelists(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	ix, err := RPMIndexForSolve(t.Context(), srv.URL)
+	ix, err := RPMIndexForSolve(context.Background(), srv.URL)
 	if err != nil {
 		t.Fatal(err)
 	}

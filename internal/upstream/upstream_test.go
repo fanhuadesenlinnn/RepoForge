@@ -171,6 +171,54 @@ func TestParseDEBDepsAnyQualifier(t *testing.T) {
 	}
 }
 
+func TestRPMIndexMergesFilelists(t *testing.T) {
+	flXML := `<?xml version="1.0"?>
+<filelists packages="1">
+  <package pkgid="AAAA" name="vim-enhanced" arch="x86_64">
+    <version epoch="0" ver="8.2" rel="1.el9"/>
+    <file>/usr/bin/vim</file>
+    <file>/usr/bin/view</file>
+  </package>
+</filelists>`
+	var buf bytes.Buffer
+	w := gzip.NewWriter(&buf)
+	w.Write([]byte(flXML))
+	w.Close()
+	flgz := buf.Bytes()
+
+	repomd := `<?xml version="1.0"?>
+<repomd>
+  <revision>123</revision>
+  <data type="primary"><location href="repodata/abc-primary.xml.gz"/></data>
+  <data type="filelists"><location href="repodata/abc-filelists.xml.gz"/></data>
+</repomd>`
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "repomd.xml"):
+			w.Write([]byte(repomd))
+		case strings.HasSuffix(r.URL.Path, "primary.xml.gz"):
+			w.Write(rpmPrimary())
+		case strings.HasSuffix(r.URL.Path, "filelists.xml.gz"):
+			w.Write(flgz)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	ix, err := RPMIndexForSolve(t.Context(), srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ix.Packages) != 1 {
+		t.Fatalf("packages = %d", len(ix.Packages))
+	}
+	if got := ix.Packages[0].Files; len(got) != 2 || got[0] != "/usr/bin/vim" {
+		t.Fatalf("files = %v", got)
+	}
+}
+
 func TestFilelistsParsing(t *testing.T) {
 	flXML := `<?xml version="1.0"?>
 <filelists packages="1">

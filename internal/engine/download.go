@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -44,6 +45,29 @@ func newDownloader(jobs int, segment repo.SegmentMode, segSizeMiB int64, resume 
 	return &downloader{client: upstream.NewClient(), jobs: jobs, segment: segment, segSize: segSizeMiB << 20, resume: resume}
 }
 
+// applyFragileTune lowers parallelism for CDNs that reset or throttle the
+// Go HTTP stack (official Kylin / cs2c on Tencent EdgeOne).
+func (d *downloader) applyFragileTune(urls ...string) {
+	if !upstream.AnyFragile(urls...) {
+		return
+	}
+	if d.jobs > upstream.FragileMaxJobs {
+		d.jobs = upstream.FragileMaxJobs
+	}
+	d.segment = repo.SegmentDisabled
+}
+
+func expandedURLs(ev *repo.Expanded) []string {
+	out := make([]string, 0, len(ev.Sources)+1)
+	if ev.URL != "" {
+		out = append(out, ev.URL)
+	}
+	for _, s := range ev.Sources {
+		out = append(out, s.URL)
+	}
+	return out
+}
+
 // partPath returns a stable temp path so an interrupted download can resume.
 func partPath(dst string) string {
 	return filepath.Join(filepath.Dir(dst), "."+filepath.Base(dst)+".part")
@@ -70,33 +94,76 @@ func (d *downloader) fetch(ctx context.Context, url, dst, checksum string, size 
 		os.Remove(part) // fall through to single connection on any failure
 	}
 
+	// Single-connection download with retry: the source CDN intermittently hangs
+	// or resets a connection; retry on a fresh connection a couple of times,
+	// keeping any partial bytes so a mid-file stall can resume via Range.
+	var lastErr error
+	for attempt := 0; attempt <= 2; attempt++ {
+		lastErr = d.singleFetch(ctx, url, part, have, checksum, size)
+		if lastErr == nil {
+			return os.Rename(part, dst)
+		}
+		if ctx.Err() != nil {
+			return fmt.Errorf("%s: %w", url, lastErr)
+		}
+		if d.resume && isResumeWorthy(lastErr) {
+			if st, err := os.Stat(part); err == nil && st.Size() > have {
+				have = st.Size()
+				upstream.CloseIdle()
+				continue
+			}
+		}
+		os.Remove(part)
+		have = 0
+		upstream.CloseIdle()
+	}
+	return fmt.Errorf("%s: %w", url, lastErr)
+}
+
+func isResumeWorthy(err error) bool {
+	if err == nil {
+		return false
+	}
+	if upstream.IsTransient(err) {
+		return true
+	}
+	var se shortSizeError
+	return errors.As(err, &se) && se.got < se.want
+}
+
+type shortSizeError struct{ got, want int64 }
+
+func (e shortSizeError) Error() string {
+	return fmt.Sprintf("大小校验失败: 期望 %d 实际 %d", e.want, e.got)
+}
+
+// singleFetch performs one request+write of a single-connection download.
+func (d *downloader) singleFetch(ctx context.Context, url, part string, have int64, checksum string, size int64) error {
+	if err := os.MkdirAll(filepath.Dir(part), 0o755); err != nil {
+		return err
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return err
 	}
-	req.Header.Set("User-Agent", upstream.UserAgent)
+	upstream.PrepareRequest(req)
 	if have > 0 {
 		req.Header.Set("Range", fmt.Sprintf("bytes=%d-", have))
 	}
 	resp, err := d.client.Do(req)
 	if err != nil {
-		return fmt.Errorf("请求 %s 失败: %w", url, err)
+		return fmt.Errorf("请求失败: %w", err)
 	}
 	defer resp.Body.Close()
 	if have > 0 && resp.StatusCode == http.StatusRequestedRangeNotSatisfiable {
-		// Server lost the partial file; restart from scratch.
-		os.Remove(part)
-		return d.fetch(ctx, url, dst, checksum, size)
+		return fmt.Errorf("服务器失去部分文件")
 	}
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
-		return fmt.Errorf("GET %s 返回 HTTP %d", url, resp.StatusCode)
+		return fmt.Errorf("GET 返回 HTTP %d", resp.StatusCode)
 	}
-	// Wrap body with a read-idle timeout so a hung connection aborts rather
-	// than blocking the whole download forever.
-	resp.Body = struct {
-		io.Reader
-		io.Closer
-	}{idleReader{r: resp.Body}, resp.Body}
+	resp.Body = upstream.IdleBody(resp.Body, cancel)
 
 	f, err := os.OpenFile(part, os.O_CREATE|os.O_RDWR, 0o644)
 	if err != nil {
@@ -109,17 +176,13 @@ func (d *downloader) fetch(ctx context.Context, url, dst, checksum string, size 
 		}
 	}
 	hasher := sha256.New()
-	// If we resumed with a Range request, the bytes written do not start at 0,
-	// so compute the full checksum over existing + appended by seeking back.
 	var n int64
 	if have > 0 {
-		// hash the existing prefix
 		f.Seek(0, io.SeekStart)
 		if _, err := io.Copy(hasher, f); err != nil {
 			f.Close()
 			return err
 		}
-		// then append new bytes at the end
 		f.Seek(have, io.SeekStart)
 		w, werr := io.Copy(io.MultiWriter(f, hasher), resp.Body)
 		n = have + w
@@ -139,14 +202,12 @@ func (d *downloader) fetch(ctx context.Context, url, dst, checksum string, size 
 		return err
 	}
 	if size > 0 && n != size {
-		os.Remove(part)
-		return fmt.Errorf("大小校验失败 %s: 期望 %d 实际 %d", url, size, n)
+		return shortSizeError{got: n, want: size}
 	}
 	if checksum != "" && !strings.EqualFold(hex.EncodeToString(hasher.Sum(nil)), checksum) {
-		os.Remove(part)
-		return fmt.Errorf("SHA256 校验失败 %s", url)
+		return fmt.Errorf("SHA256 校验失败")
 	}
-	return os.Rename(part, dst)
+	return nil
 }
 
 // segmentedFetch downloads a large file by splitting it into N concurrent HTTP
@@ -162,7 +223,7 @@ func (d *downloader) segmentedFetch(ctx context.Context, url, dst string, size i
 	if err != nil {
 		return err
 	}
-	probe.Header.Set("User-Agent", upstream.UserAgent)
+	upstream.PrepareRequest(probe)
 	probe.Header.Set("Range", "bytes=0-0")
 	pr, err := d.client.Do(probe)
 	if err != nil {
@@ -217,12 +278,14 @@ func (d *downloader) segmentedFetch(ctx context.Context, url, dst string, size i
 		wg.Add(1)
 		go func(idx int, start, end int64) {
 			defer wg.Done()
-			req, rerr := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+			segCtx, segCancel := context.WithCancel(ctx)
+			defer segCancel()
+			req, rerr := http.NewRequestWithContext(segCtx, http.MethodGet, url, nil)
 			if rerr != nil {
 				errs[idx] = rerr
 				return
 			}
-			req.Header.Set("User-Agent", upstream.UserAgent)
+			upstream.PrepareRequest(req)
 			req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", start, end))
 			resp, rerr := d.client.Do(req)
 			if rerr != nil {
@@ -234,10 +297,7 @@ func (d *downloader) segmentedFetch(ctx context.Context, url, dst string, size i
 				errs[idx] = fmt.Errorf("segment %d HTTP %d", idx, resp.StatusCode)
 				return
 			}
-			resp.Body = struct {
-				io.Reader
-				io.Closer
-			}{idleReader{r: resp.Body}, resp.Body}
+			resp.Body = upstream.IdleBody(resp.Body, segCancel)
 			// Each goroutine writes at its fixed offset (no shared cursor).
 			f, oerr := os.OpenFile(dst, os.O_WRONLY, 0o644)
 			if oerr != nil {

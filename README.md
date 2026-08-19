@@ -19,8 +19,9 @@ RepoForge 是一个**跨平台（Windows / Linux / macOS）**的离线 Linux 软
 - **多文件并行**：多个包同时下载（`sync.concurrency`，默认 8）。
 - **单大文件分段**：`sync.segment` 是开关+数量一体——`false`=不分片（只用多文件并行）；正整数=单文件分段上限；缺省=智能(默认 8)，
   段数按文件大小自动 `ceil(size/segment_threshold)`。例如 20 MiB 每段：40MiB→2 段、100MiB→5 段、200MiB→8 段(封顶)；≤20MiB 不分段。
-- **断点续传**：中断后从断点继续，不重下（`sync.resume: true`）。
+- **断点续传**：中断后从断点继续，不重下（`sync.resume: true`）。中途被 CDN 掐断时也会带着已下字节重试 Range。
 - **增量**：已存在且校验匹配的包跳过；孤儿 `.part` 自动清理。
+- **脆弱镜像自动降压**：官方麒麟源（`*.cs2c.com.cn` / `*.kylinos.cn`，腾讯 EdgeOne）会重置或限速 Go HTTP 客户端。引擎自动把并发降到 2、关闭分段，并给连接加上空闲超时，避免卡死。
 
 ## 快速开始
 
@@ -106,7 +107,7 @@ repositories:
 - **制作方式**：配 `sync` → `repoforge sync` 整仓镜像；配 `input.packages` → `repoforge make` 按需。
 - **下载性能**：`sync.concurrency` 多文件并行数（默认 8）；`sync.segment_threshold` 每段大小 MiB
   （默认 20）；`sync.segment`（`false`=不分片 / 正整数=单文件分段上限 / 缺省=智能默认8）；
-  `sync.resume: true` 断点续传。
+  `sync.resume: true` 断点续传。官方麒麟源会自动降并发、关分段。
 - **多仓库聚合**：真实发行版常由多个子仓组成（如 CentOS 的 BaseOS + AppStream，vim 在 AppStream，
   而 glibc 等基础库在 BaseOS）。用 `upstream.sources` 聚合多个源做统一依赖求解并输出到同一目录：
 

@@ -102,9 +102,9 @@ repositories:
   #   sync:
   #     enabled: true
   #     delete_policy: keep      # keep=只增不删；prune=删除上游已下线包
-  #     concurrency: 8           # 多文件并行数
+  #     concurrency: 8           # 多文件并行数（官方麒麟源会自动降到 2）
   #     segment_threshold: 20    # 单文件分段基准 MiB
-  #     segment: 8               # false=不分片只用多文件并行；数字=单文件分段上限；缺省=智能(默认8)
+  #     segment: 8               # false=不分片只用多文件并行；数字=单文件分段上限；缺省=智能(默认8)；麒麟源自动关闭
   #     resume: true             # 断点续传
 
   # 例4：DEB 多套件（Debian/Ubuntu）

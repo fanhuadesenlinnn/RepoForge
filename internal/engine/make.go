@@ -109,6 +109,7 @@ func Make(ctx context.Context, cfg *repo.Config, ev *repo.Expanded) (*MakeResult
 		})
 	}
 	d := newDownloader(r.Sync.Concurrency, r.Sync.Segment, r.Sync.SegmentThreshold, true)
+	d.applyFragileTune(expandedURLs(ev)...)
 	downloaded, errs := d.runAll(ctx, items)
 	problems = append(problems, errs...)
 

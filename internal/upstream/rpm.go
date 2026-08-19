@@ -1,6 +1,7 @@
 package upstream
 
 import (
+	"bytes"
 	"compress/gzip"
 	"context"
 	"encoding/xml"
@@ -49,11 +50,12 @@ func rpmIndex(ctx context.Context, baseURL string, withFilelists bool) (*Index, 
 	if err != nil {
 		return nil, fmt.Errorf("读取 %s: %w", primaryURL, err)
 	}
-	xmlData, err := decompressAny(raw, href)
+	stream, err := openDecompressed(bytes.NewReader(raw), href)
 	if err != nil {
 		return nil, err
 	}
-	pkgs, err := parsePrimaryXML(xmlData)
+	pkgs, err := parsePrimaryXMLReader(stream)
+	stream.Close()
 	if err != nil {
 		return nil, err
 	}
@@ -84,18 +86,21 @@ func findData(rd *repomd, typ string) string {
 	return ""
 }
 
-// fetchFilelists downloads and parses filelists.xml into a map keyed by pkgid.
+// fetchFilelists downloads and stream-parses filelists.xml into a map keyed
+// by pkgid. Streaming avoids materializing the uncompressed XML (Kylin
+// filelists is ~10MB gzip / ~160MB raw) as a single buffer + DOM tree.
 func fetchFilelists(ctx context.Context, base, href string) map[string][]string {
 	url := base + "/" + href
 	raw, err := Fetch(ctx, url)
 	if err != nil {
 		return nil
 	}
-	data, err := decompressAny(raw, href)
+	stream, err := openDecompressed(bytes.NewReader(raw), href)
 	if err != nil {
 		return nil
 	}
-	return parseFilelistsXML(data)
+	defer stream.Close()
+	return parseFilelistsXMLReader(stream)
 }
 
 type repomd struct {
@@ -111,26 +116,31 @@ type location struct {
 }
 
 func decompressAny(data []byte, name string) ([]byte, error) {
+	r, err := openDecompressed(bytes.NewReader(data), name)
+	if err != nil {
+		return nil, err
+	}
+	defer r.Close()
+	return io.ReadAll(r)
+}
+
+func openDecompressed(r io.Reader, name string) (io.ReadCloser, error) {
 	switch {
 	case strings.HasSuffix(name, ".gz"):
-		r, err := gzip.NewReader(strings.NewReader(string(data)))
+		gz, err := gzip.NewReader(r)
 		if err != nil {
 			return nil, fmt.Errorf("解压 %s 失败: %w", name, err)
 		}
-		defer r.Close()
-		return io.ReadAll(r)
+		return gz, nil
 	case strings.HasSuffix(name, ".zst"):
 		return nil, fmt.Errorf("暂不支持 zstd 压缩元数据 %s（当前仅支持 gzip）", name)
 	default:
-		return data, nil
+		return io.NopCloser(r), nil
 	}
 }
 
 // ---- primary.xml parsing ----
 
-type primaryXML struct {
-	Packages []primaryPkg `xml:"package"`
-}
 type primaryPkg struct {
 	Name       string      `xml:"name"`
 	Arch       string      `xml:"arch"`
@@ -167,42 +177,60 @@ type pkgRel struct {
 }
 
 func parsePrimaryXML(data []byte) ([]Pkg, error) {
-	var pm primaryXML
-	if err := xml.Unmarshal(data, &pm); err != nil {
-		return nil, fmt.Errorf("解析 primary.xml 失败: %w", err)
+	return parsePrimaryXMLReader(bytes.NewReader(data))
+}
+
+// parsePrimaryXMLReader stream-decodes one <package> at a time so a 40MB
+// primary.xml (Kylin base) never sits in memory as a full DOM tree.
+func parsePrimaryXMLReader(r io.Reader) ([]Pkg, error) {
+	dec := xml.NewDecoder(r)
+	var out []Pkg
+	for {
+		tok, err := dec.Token()
+		if err == io.EOF {
+			return out, nil
+		}
+		if err != nil {
+			return nil, fmt.Errorf("解析 primary.xml 失败: %w", err)
+		}
+		se, ok := tok.(xml.StartElement)
+		if !ok || se.Name.Local != "package" {
+			continue
+		}
+		var p primaryPkg
+		if err := dec.DecodeElement(&p, &se); err != nil {
+			return nil, fmt.Errorf("解析 primary.xml 失败: %w", err)
+		}
+		out = append(out, primaryToPkg(p))
 	}
-	out := make([]Pkg, 0, len(pm.Packages))
-	for _, p := range pm.Packages {
-		pkg := Pkg{
-			Name:     p.Name,
-			Epoch:    p.Version.Epoch,
-			Version:  p.Version.Ver,
-			Release:  p.Version.Rel,
-			Arch:     p.Arch,
-			Location: p.Location.Href,
-			Checksum: p.Checksum.Text,
-			Size:     p.Size.Package,
-			Summary:  p.Summary,
-		}
-		for _, r := range p.Requires {
-			pkg.Requires = append(pkg.Requires, DependencyEntry{Name: r.Name, Op: r.Flags, Version: r.Ver})
-		}
-		for _, r := range p.Recommends {
-			pkg.Recommends = append(pkg.Recommends, DependencyEntry{Name: r.Name, Op: r.Flags, Version: r.Ver})
-		}
-		for _, r := range p.Provides {
-			pkg.Provides = append(pkg.Provides, r.Name)
-		}
-		out = append(out, pkg)
+}
+
+func primaryToPkg(p primaryPkg) Pkg {
+	pkg := Pkg{
+		Name:     p.Name,
+		Epoch:    p.Version.Epoch,
+		Version:  p.Version.Ver,
+		Release:  p.Version.Rel,
+		Arch:     p.Arch,
+		Location: p.Location.Href,
+		Checksum: p.Checksum.Text,
+		Size:     p.Size.Package,
+		Summary:  p.Summary,
 	}
-	return out, nil
+	for _, r := range p.Requires {
+		pkg.Requires = append(pkg.Requires, DependencyEntry{Name: r.Name, Op: r.Flags, Version: r.Ver})
+	}
+	for _, r := range p.Recommends {
+		pkg.Recommends = append(pkg.Recommends, DependencyEntry{Name: r.Name, Op: r.Flags, Version: r.Ver})
+	}
+	for _, r := range p.Provides {
+		pkg.Provides = append(pkg.Provides, r.Name)
+	}
+	return pkg
 }
 
 // ---- filelists.xml parsing ----
 
-type filelistsXML struct {
-	Packages []filelistPkg `xml:"package"`
-}
 type filelistPkg struct {
 	PkgID   string   `xml:"pkgid,attr"`
 	Name    string   `xml:"name,attr"`
@@ -217,15 +245,32 @@ type flVer struct {
 }
 
 func parseFilelistsXML(data []byte) map[string][]string {
-	var fl filelistsXML
-	if xml.Unmarshal(data, &fl) != nil {
-		return nil
+	return parseFilelistsXMLReader(bytes.NewReader(data))
+}
+
+func parseFilelistsXMLReader(r io.Reader) map[string][]string {
+	dec := xml.NewDecoder(r)
+	out := make(map[string][]string)
+	for {
+		tok, err := dec.Token()
+		if err != nil {
+			if err == io.EOF {
+				return out
+			}
+			return nil
+		}
+		se, ok := tok.(xml.StartElement)
+		if !ok || se.Name.Local != "package" {
+			continue
+		}
+		var p filelistPkg
+		if err := dec.DecodeElement(&p, &se); err != nil {
+			return nil
+		}
+		if p.PkgID != "" {
+			out[p.PkgID] = p.Files
+		}
 	}
-	out := make(map[string][]string, len(fl.Packages))
-	for _, p := range fl.Packages {
-		out[p.PkgID] = p.Files
-	}
-	return out
 }
 
 // mergeFilelists attaches file provides to packages matched by pkgid (checksum).

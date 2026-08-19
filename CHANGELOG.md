@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- 修复：官方麒麟镜像（`update.cs2c.com.cn` 等腾讯 EdgeOne CDN）导致 sync/make 卡住或极慢。HTTP 客户端补齐 Dial/TLS/空闲超时，连接重置与挂起的 body 自动重试；对该源自动降低并发并关闭分段；RPM primary/filelists 改为流式解析。
+
 ## v0.3.0
 
 - 新增：`make-upgrade` 命令，支持为 RPM 系统下载当前机器升级所需的软件包并生成离线升级源。

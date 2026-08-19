@@ -24,6 +24,16 @@ RepoForge 是一个**跨平台（Windows / Linux / macOS）**的离线 Linux 软
 - **增量**：已存在且校验匹配的包跳过；孤儿 `.part` 自动清理。
 - **脆弱镜像自动降压**：官方麒麟源（`*.cs2c.com.cn` / `*.kylinos.cn`，腾讯 EdgeOne）会重置或限速 Go HTTP 客户端。引擎自动把并发降到 2、关闭分段，并给连接加上空闲超时，避免卡死。
 
+## 安装
+
+从 [Releases](https://github.com/fanhuadesenlinnn/RepoForge/releases) 下载对应架构的压缩包：
+
+```bash
+sudo tar -C /opt -xzf repoforge_v1.0.0_linux_amd64.tar.gz
+export PATH="/opt/repoforge/bin:$PATH"
+repoforge init
+```
+
 ## 快速开始
 
 1. 放置 `repo.yaml`（参考 `repo.example.yaml`），填写你想同步/制作的仓库。

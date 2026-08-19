@@ -2,10 +2,15 @@
 
 ## Unreleased
 
-- 修复：官方麒麟镜像（`update.cs2c.com.cn` 等腾讯 EdgeOne CDN）导致 sync/make 卡住或极慢。HTTP 客户端补齐 Dial/TLS/空闲超时，连接重置与挂起的 body 自动重试；对该源自动降低并发并关闭分段；RPM primary/filelists 改为流式解析。
-- 修复：`sync` 结束后生成完整 yum/apt 索引；`make`/`sync` 写出的 primary.xml 包含 Requires/Provides，离线 dnf/yum 能解依赖。
-- 新增：sync/make 输出元数据与下载进度，避免长时间任务看起来像卡死。
-- 调整：`list` / `check` / `make-upgrade` 全部改为读取 `repo.yaml`。移除 profile / packages.yaml / 本机 dnf·apt 旧路径。
+## v1.0.0
+
+首个稳定大版本：只保留单文件 `repo.yaml` + 纯 Go 引擎，不再依赖本机 dnf/apt/createrepo。
+
+- 破坏性变更：移除 `config.yaml` / `packages.yaml` / profiles，以及本机 dnf·apt 后端。`list` / `check` / `make-upgrade` 改为只读 `repo.yaml`；`--profile` 已删除。
+- 新增：`sync` 结束后生成完整 yum/apt 索引；`make`/`sync` 写出的 primary.xml 包含 Requires/Provides，离线 dnf/yum 能解依赖。
+- 新增：sync/make 输出元数据与下载进度。
+- 新增：`make-upgrade` 用本机 rpm/dpkg 对照上游后走新引擎下载并生成索引。
+- 修复：官方麒麟镜像（`update.cs2c.com.cn` 等腾讯 EdgeOne CDN）导致卡住或极慢——补齐超时、自动降并发、关分段、流式解析元数据。
 
 ## v0.3.0
 

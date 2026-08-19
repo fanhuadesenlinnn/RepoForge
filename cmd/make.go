@@ -1,139 +1,92 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
-	"strings"
 
-	"github.com/fanhuadesenlinnn/RepoForge/internal/backend"
-	"github.com/fanhuadesenlinnn/RepoForge/internal/backend/deb"
-	"github.com/fanhuadesenlinnn/RepoForge/internal/backend/rpm"
-	"github.com/fanhuadesenlinnn/RepoForge/internal/config"
-	"github.com/fanhuadesenlinnn/RepoForge/internal/detect"
-	"github.com/fanhuadesenlinnn/RepoForge/internal/executor"
+	"github.com/fanhuadesenlinnn/RepoForge/internal/engine"
 	"github.com/fanhuadesenlinnn/RepoForge/internal/home"
+	"github.com/fanhuadesenlinnn/RepoForge/internal/repo"
 	"github.com/spf13/cobra"
 )
 
 func newMakeCommand() *cobra.Command {
-	var profileName string
+	var repoName string
 	command := &cobra.Command{
-		Use:   "make",
-		Short: "制作离线软件源",
-		Args:  noArgs,
-		RunE: func(command *cobra.Command, _ []string) error {
-			homeDir, cfg, profile, packages, runner, err := loadMakeInputs(command.Context(), profileName)
-			if err != nil {
-				return err
-			}
-			selected, err := selectBackend(profile.Backend, runner)
-			if err != nil {
-				return err
-			}
-			fmt.Fprintf(command.OutOrStdout(), `开始制作离线软件源。
+		Use:   "make [packages...]",
+		Short: "按需制作离线源（点名 / 本地补齐依赖 / 升级）",
+		Long: `按 repo.yaml 中配置的 repositories 制作离线源。
 
-profile: %s
-backend: %s
-配置文件包数: %d
-软件源目录: %s
-`, profile.Profile, selected.Name(), len(packages), profile.Repository.PackageDir)
-			if len(profile.Input.PackageDirs) > 0 {
-				fmt.Fprintf(command.OutOrStdout(), "输入目录: %v\n", profile.Input.PackageDirs)
-			}
-			fmt.Fprintf(command.OutOrStdout(), "\n正在下载软件包及依赖并生成索引...\n")
-			if err := selected.Make(command.Context(), cfg, profile, packages); err != nil {
+支持多种起点（可并存），输出统一到 repo_dir/<name>：
+  - make.packages          点名要做的软件（+ 依赖）
+  - input.package_dirs     本地已有包 → 补齐缺失依赖
+  - input.upgrade_packages 升级 → 取这些软件的上游新版本（+ 依赖）
+
+依赖自动求解（RPM 与 DEB 都支持），生成可离线使用的 yum/apt 源。
+可用 --repo 指定仓库；命令行额外包会追加到 make.packages。`,
+		Args: cobra.ArbitraryArgs,
+		RunE: func(command *cobra.Command, args []string) error {
+			homeDir, err := home.Detect(false)
+			if err != nil {
 				return err
 			}
-			fmt.Fprintf(command.OutOrStdout(), "\n完成。\n软件源目录：%s\nRepoForge Home：%s\n", profile.Repository.PackageDir, homeDir)
+			cfg, err := repo.Load(homeDir)
+			if err != nil {
+				return err
+			}
+			repos := selectRepos(cfg, repoName, func(r *repo.Repository) bool {
+				return true
+			})
+			if repoName != "" && len(repos) == 0 {
+				return fmt.Errorf("未找到 repository %q", repoName)
+			}
+			if repoName == "" {
+				repos = nil
+				for i := range cfg.Repositories {
+					r := &cfg.Repositories[i]
+					if len(r.Input.Packages) > 0 || len(r.Input.PackageDirs) > 0 || len(r.Input.UpgradePackages) > 0 {
+						repos = append(repos, r)
+					}
+				}
+			}
+			if len(repos) == 0 {
+				return fmt.Errorf("没有配置 make.packages / input 的仓库")
+			}
+			var anyErr bool
+			for _, r := range repos {
+				pkgs := append(append([]string{}, r.Input.Packages...), args...)
+				variants, err := repo.Expand(cfg, r)
+				if err != nil {
+					return err
+				}
+				for _, ev := range variants {
+					fmt.Fprintf(command.OutOrStdout(), "制作离线源: %s\n  点名: %v\n  升级: %v\n  输出: %s\n",
+						r.Name, pkgs, r.Input.UpgradePackages, ev.ContentRoot(cfg))
+					mk := ev
+					mk.Repository.Input.Packages = pkgs
+					result, err := engine.Make(command.Context(), cfg, &mk)
+					if err != nil {
+						fmt.Fprintf(command.OutOrStderr(), "[ERROR] %s: %v\n", r.Name, err)
+						anyErr = true
+						continue
+					}
+					fmt.Fprintf(command.OutOrStdout(), "完成: 已选 %d 包，下载 %d，本地复制 %d，repodata: %s\n",
+						result.Selected, result.Downloaded, result.Copied, result.Repodata)
+					for _, n := range result.Notices {
+						fmt.Fprintf(command.OutOrStdout(), "  [INFO] %s\n", n)
+					}
+					for _, p := range result.Problems {
+						fmt.Fprintf(command.OutOrStderr(), "  [WARN] %s\n", p)
+						anyErr = true
+					}
+				}
+			}
+			if anyErr {
+				return fmt.Errorf("制作过程中存在未解决的问题")
+			}
+			fmt.Fprintln(command.OutOrStdout(), "离线源制作完成。")
 			return nil
 		},
 	}
-	command.Flags().StringVar(&profileName, "profile", "", "要制作的 profile 名称（留空自动匹配当前系统）")
+	command.Flags().StringVar(&repoName, "repo", "", "要制作的 repository 名称")
 	return command
-}
-
-func loadMakeInputs(ctx context.Context, requestedProfile string) (string, *config.Config, *config.ProfileConfig, []string, executor.Runner, error) {
-	homeDir, cfg, profile, runner, err := loadProfileInputs(ctx, requestedProfile)
-	if err != nil {
-		return "", nil, nil, nil, nil, err
-	}
-	packages, err := config.PackagesForProfile(homeDir, profile.Profile)
-	if err != nil {
-		return "", nil, nil, nil, nil, err
-	}
-	return homeDir, cfg, profile, packages, runner, nil
-}
-
-func loadProfileInputs(ctx context.Context, requestedProfile string) (string, *config.Config, *config.ProfileConfig, executor.Runner, error) {
-	homeDir, err := home.Detect(false)
-	if err != nil {
-		return "", nil, nil, nil, err
-	}
-	cfg, err := config.Load(homeDir)
-	if err != nil {
-		return "", nil, nil, nil, err
-	}
-	runner := executor.New(false)
-	system, err := detect.Current(ctx, runner)
-	if err != nil {
-		return "", nil, nil, nil, err
-	}
-
-	profileName, err := resolveProfile(homeDir, requestedProfile, system)
-	if err != nil {
-		return "", nil, nil, nil, err
-	}
-
-	profile, err := config.LoadProfile(homeDir, profileName)
-	if err != nil {
-		return "", nil, nil, nil, err
-	}
-	if err := detect.CheckCompatibility(system, profile); err != nil {
-		return "", nil, nil, nil, err
-	}
-	return homeDir, cfg, profile, runner, nil
-}
-
-// resolveProfile resolves the profile to use: explicit > auto-detect > error.
-func resolveProfile(homeDir, requestedProfile string, system detect.System) (string, error) {
-	if requestedProfile != "" {
-		return requestedProfile, nil
-	}
-	// Try auto-detection.
-	matches, err := config.FindMatchingProfiles(homeDir, system.ID, system.RawArch, system.Backend)
-	if err != nil {
-		return "", err
-	}
-	if len(matches) == 1 {
-		fmt.Printf("自动匹配 profile: %s\n\n", matches[0].Profile)
-		return matches[0].Profile, nil
-	}
-	if len(matches) > 1 {
-		names := make([]string, len(matches))
-		for i, p := range matches {
-			names[i] = p.Profile
-		}
-		return "", fmt.Errorf("检测到多个匹配的 profile，请用 --profile 指定:\n  %s", strings.Join(names, "\n  "))
-	}
-	// List all available.
-	all, err := config.LoadProfiles(homeDir)
-	if err != nil {
-		return "", err
-	}
-	names := make([]string, len(all))
-	for i, p := range all {
-		names[i] = p.Profile
-	}
-	return "", fmt.Errorf("未找到与当前系统匹配的 profile，请用 --profile 指定。\n可用 profile:\n  %s", strings.Join(names, "\n  "))
-}
-
-func selectBackend(name string, runner executor.Runner) (backend.Backend, error) {
-	switch name {
-	case "rpm":
-		return rpm.New(runner), nil
-	case "deb":
-		return deb.New(runner), nil
-	default:
-		return nil, fmt.Errorf("不支持的 backend: %s", name)
-	}
 }

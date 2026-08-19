@@ -35,10 +35,10 @@ repoforge sync
 repoforge sync --repo rocky-9
 
 # 按需制作离线源（自动求解依赖）
-repoforge install --repo rocky-9-install
+repoforge make --repo rocky-9-install
 
 # 命令行临时追加要装的软件
-repoforge install vim curl --repo rocky-9-install
+repoforge make vim curl --repo rocky-9-install
 
 # 生成客户端源配置
 repoforge client
@@ -81,7 +81,7 @@ repositories:
       vars:
         - name: basearch
           value: x86_64
-    install:
+    input:
       packages: [vim, curl, nginx]
 
   # DEB 多套件/组件/架构
@@ -93,7 +93,7 @@ repositories:
         - suite: bookworm
           components: [main, contrib]
       arch: [amd64, all]
-    install:
+    input:
       packages: [vim, htop]
 ```
 
@@ -103,7 +103,7 @@ repositories:
   顶层 `vars` 共享，`upstream.vars` 局部可覆盖。
 - **目录**：全局 `paths.repo_dir` 定根；仓库级 `repo_dir` 可选覆盖（为该仓库内容根）；
   多架构/套件自动展开子目录，无需手写。
-- **制作方式**：配 `sync` → `repoforge sync` 整仓镜像；配 `install.packages` → `repoforge install` 按需。
+- **制作方式**：配 `sync` → `repoforge sync` 整仓镜像；配 `input.packages` → `repoforge make` 按需。
 - **下载性能**：`sync.concurrency` 多文件并行数（默认 8）；`sync.segment_threshold` 每段大小 MiB
   （默认 20，段数自动算）；`sync.max_segments` 单文件分段上限（默认 8）；`sync.resume: true` 断点续传。
 - **多仓库聚合**：真实发行版常由多个子仓组成（如 CentOS 的 BaseOS + AppStream，vim 在 AppStream，
@@ -119,7 +119,7 @@ repositories:
         - url: http://mirrors.aliyun.com/centos-vault/8.5.2111/AppStream/$basearch/os/
           vars: [{ name: basearch, value: x86_64 }]
       verify: sha256
-    install:
+    input:
       packages: [vim-enhanced]
     dependency:
       weak_deps: false

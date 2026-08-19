@@ -63,7 +63,7 @@ type Repository struct {
 	Target     Target     `yaml:"target"`
 	Upstream   Upstream   `yaml:"upstream"`
 	Sync       Sync       `yaml:"sync"`
-	Install    Install    `yaml:"install"`
+	Input      Input      `yaml:"input"`
 	Dependency Dependency `yaml:"dependency"`
 	Local      LocalRepo  `yaml:"local"`
 	Client     ClientRepo `yaml:"client"`
@@ -127,9 +127,19 @@ type Sync struct {
 	Resume      bool `yaml:"resume"`
 }
 
-// Install enables on-demand building (specified packages + dependency solving).
-type Install struct {
+// Input holds the make command's starting points. Multiple may be set; the
+// engine unionizes them and resolves the resulting dependency set.
+type Input struct {
+	// Packages are packages explicitly requested for the offline source
+	// (their dependencies are resolved too). Formerly make.packages.
 	Packages []string `yaml:"packages"`
+	// PackageDirs are directories with pre-existing rpms/debs used as a
+	// starting point: their missing dependencies are fetched into repo_dir.
+	PackageDirs []string `yaml:"package_dirs"`
+	Recursive   bool     `yaml:"recursive"`
+	// UpgradePackages lists packages to fetch at their latest available version
+	// from upstream (plus their dependencies) — i.e. build an upgrade source.
+	UpgradePackages []string `yaml:"upgrade_packages"`
 }
 
 // Dependency holds dependency solving strategy.

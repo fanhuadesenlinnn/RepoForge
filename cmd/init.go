@@ -28,8 +28,10 @@ func newInitCommand() *cobra.Command {
 Home：%s
 
 下一步：
-1. 编辑 %s/config/packages.yaml，添加需要的软件包
-2. 执行 repoforge make 开始制作离线源
+1. 编辑 %s/config/repo.yaml，配置你的仓库（含注释示例，改改即可用）
+2. 执行 repoforge sync   全量镜像上游仓库
+   或   repoforge make   按需制作离线源（input 点名）
+3. 需要时：repoforge client / use / server 分发
 `, homeDir, homeDir)
 			return nil
 		},

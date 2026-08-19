@@ -198,8 +198,9 @@ func validate(cfg *Config) error {
 		default:
 			return fmt.Errorf("repository %q 的 delete_policy %q 无效（keep|prune|prune-expired）", r.Name, r.Sync.DeletePolicy)
 		}
-		if !r.Sync.Enabled && len(r.Install.Packages) == 0 {
-			return fmt.Errorf("repository %q 未启用 sync 也未配置 install.packages，无事可做", r.Name)
+		if !r.Sync.Enabled && len(r.Input.Packages) == 0 &&
+			len(r.Input.PackageDirs) == 0 && len(r.Input.UpgradePackages) == 0 {
+			return fmt.Errorf("repository %q 未启用 sync 也未配置 make.packages / input，无事可做", r.Name)
 		}
 		for _, v := range r.Upstream.Vars {
 			if v.Name == "" {

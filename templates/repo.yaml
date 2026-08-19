@@ -1,26 +1,40 @@
-# RepoForge 单文件配置（schema v2）
-# 所有内容都在这一个文件里：全局运行环境 + 共享变量 + 多个仓库定义。
+# ============================================================
+# RepoForge 默认配置（schema v2）
+# ------------------------------------------------------------
+# 这是一个"开箱即用"的例子：只需要改 repositories 里的仓库，
+# 保存后运行 `repoforge sync` 或 `repoforge make` 即可制作离线源。
+#
+#   repoforge sync        全量镜像启用了 sync 的仓库
+#   repoforge make        按需制作（input 里点名的软件 + 依赖）
+#   repoforge client      生成客户端 yum/apt 源配置
+#   repoforge use/server  本机启用 / 局域网分发
+#
+# 常见改动：
+#   1) 改 repositories 里的 upstream.url 换成你实际的镜像地址
+#   2) 想全量镜像整仓 → 加 sync: { enabled: true }
+#   3) 想按需制作      → 在 input 里填 packages / upgrade_packages
+#   4) 本地已有包      → 在 input.package_dirs 填目录
+# ============================================================
 schema_version: 2
 
-# 全局共享变量：任何仓库的 upstream.vars 未声明同名变量时回退到这里。
+# ── 全局共享变量 ─────────────────────────────────────────────
+# （可选）任何仓库的 upstream.vars 没声明同名变量时，回退到这里。
 vars:
   basearch:
     - x86_64
-  releasever:
-    - "9"
 
 app:
   name: repoforge
   log_level: info
 
 paths:
-  home_dir: auto
-  repo_dir: ${home}/repos
+  home_dir: auto            # auto = 自动探测 RepoForge Home；也可写绝对路径
+  repo_dir: ${home}/repos   # 所有离线源的输出根目录（最重要）
   cache_dir: ${home}/cache
-  client_dir: ${home}/client
+  client_dir: ${home}/client  # repoforge client 生成的客户端源配置
   log_dir: ${home}/logs
 
-server:
+server:                     # HTTP 分发服务（可选）
   listen: 0.0.0.0:8080
   root: ${home}/repos
   public_url: auto
@@ -29,60 +43,16 @@ server:
     enabled: true
     service_name: repoforge-server
 
+# ============================================================
+# 仓库定义（核心）—— 下面的都是可复制改用的例子
+# ============================================================
 repositories:
-  # ── RPM 全量镜像：多架构自动展开成独立子目录 ────────────
-  - name: rocky-9
-    backend: rpm
-    upstream:
-      url: http://mirrors.rockylinux.org/pub/rocky/$releasever/BaseOS/$basearch/os/
-      vars:
-        - name: releasever
-          value: "9"
-        - name: basearch
-          values: [x86_64, aarch64]
-      verify: sha256
-    sync:
-      enabled: true
-      delete_policy: keep
-      concurrency: 8        # 多文件并行：同时下载几个包（默认 8）
-      segment_threshold: 20 # 每段基准大小 MiB（默认 20），段数自动按文件大小计算
-      max_segments: 8       # 单个大文件最多切几段（默认 8）
-      resume: true          # 断点续传（中断后从断点继续）
-    # output = ${repo_dir}/rocky-9/{x86_64,aarch64}/（多架构自动展开）
-    # 大文件自动分段：如 100MiB→5段、200MiB→8段(封顶)、≤20MiB→单连接。
 
-  # ── RPM 按需制作：只下载指定软件 + 自动依赖求解 ────────
-  - name: rocky-9-install
-    backend: rpm
-    upstream:
-      url: http://mirrors.rockylinux.org/pub/rocky/$releasever/BaseOS/$basearch/os/
-      vars:
-        - name: releasever
-          value: "9"
-        - name: basearch
-          value: x86_64
-    install:
-      packages: [vim, curl, nginx]
-
-  # ── DEB 多套件/组件/架构 ──────────────────────────────
-  - name: debian-12
-    backend: deb
-    upstream:
-      url: https://deb.debian.org/debian
-      suites:
-        - suite: bookworm
-          components: [main, contrib]
-        - suite: bookworm-updates
-          components: [main]
-      arch: [amd64, all]
-    sync:
-      enabled: true
-    install:
-      packages: [vim, htop]
-
-  # ── RPM 多仓库聚合：BaseOS + AppStream 统一求依赖 ─────────
-  # （vim 本体的 AppStream，基础库 glibc 等在 BaseOS）
-  - name: centos-8-vault
+  # 例1：RPM 按需制作（推荐先试这个）
+  #   只下载下面 input.packages 里点名的软件 + 它们的依赖。
+  #   输出到：${repo_dir}/centos8-base
+  #   用 sources 聚合 BaseOS + AppStream（真实 CentOS 要两个源才能解全依赖）
+  - name: centos8-base
     backend: rpm
     upstream:
       sources:
@@ -94,8 +64,77 @@ repositories:
           vars:
             - name: basearch
               value: x86_64
-      verify: sha256
-    install:
-      packages: [vim-enhanced]
+      verify: sha256          # 校验方式，保持 sha256
+    input:
+      packages: [vim, curl]   # ← 把想做的软件写这里，可多可少
     dependency:
-      weak_deps: false
+      weak_deps: false        # false=只装硬依赖，true=连推荐依赖一起装
+
+  # 例2：RPM 多仓库聚合（真实 CentOS 需要 BaseOS + AppStream）
+  #   vim 在 AppStream，基础库 glibc 在 BaseOS，两个源都要才能解全依赖。
+  #   使用 sources 聚合；输出统一到一个目录。
+  # - name: centos8-full
+  #   backend: rpm
+  #   upstream:
+  #     sources:
+  #       - url: http://mirrors.aliyun.com/centos-vault/8.5.2111/BaseOS/$basearch/os/
+  #         vars: [{ name: basearch, value: x86_64 }]
+  #       - url: http://mirrors.aliyun.com/centos-vault/8.5.2111/AppStream/$basearch/os/
+  #         vars: [{ name: basearch, value: x86_64 }]
+  #     verify: sha256
+  #   input:
+  #     packages: [vim-enhanced]
+  #   dependency:
+  #     weak_deps: false
+
+  # 例3：RPM 全量镜像整仓（sync）
+  #   把整个上游仓库下载下来；多架构自动展开成子目录。
+  #   concurrency/segment_threshold/max_segments 控制下载速度，一般不用改。
+  # - name: rocky-9-mirror
+  #   backend: rpm
+  #   upstream:
+  #     url: https://mirrors.rockylinux.org/pub/rocky/$releasever/BaseOS/$basearch/os/
+  #     vars:
+  #       - name: basearch
+  #         values: [x86_64]
+  #       - name: releasever
+  #         value: "9"
+  #   sync:
+  #     enabled: true
+  #     delete_policy: keep      # keep=只增不删；prune=删除上游已下线包
+  #     concurrency: 8           # 多文件并行数
+  #     segment_threshold: 20    # 单文件分段基准 MiB
+  #     max_segments: 8          # 单文件分段上限
+  #     resume: true             # 断点续传
+
+  # 例4：DEB 多套件（Debian/Ubuntu）
+  #   用 suites 列出要同步的套件/组件；arch 列架构。
+  # - name: debian-12
+  #   backend: deb
+  #   upstream:
+  #     url: https://deb.debian.org/debian
+  #     suites:
+  #       - suite: bookworm
+  #         components: [main, contrib]
+  #       - suite: bookworm-updates
+  #         components: [main]
+  #     arch: [amd64, all]
+  #   input:
+  #     packages: [vim, htop]
+  #   sync:
+  #     enabled: true
+
+  # 例5：input 三起点组合（点名 + 本地已有包 + 升级）
+  #   package_dirs = 本地原有的 rpm/deb 目录（只读），软件复制进 repo_dir 并补缺依赖
+  #   upgrade_packages = 取这些软件上游最新版本 + 依赖
+  # - name: offline-combo
+  #   backend: rpm
+  #   upstream:
+  #     url: http://mirrors.aliyun.com/centos-vault/8.5.2111/BaseOS/$basearch/os/
+  #     vars: [{ name: basearch, value: x86_64 }]
+  #   input:
+  #     packages: [tree]                    # 点名
+  #     package_dirs: [/srv/local-pkgs]     # 本地已有包（可多个、可留空）
+  #     upgrade_packages: [glibc]           # 升级
+  #   dependency:
+  #     weak_deps: false

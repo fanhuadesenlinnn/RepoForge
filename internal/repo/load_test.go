@@ -162,7 +162,7 @@ repositories:
           vars:
             - name: basearch
               value: x86_64
-    install:
+    input:
       packages: [vim]
 `
 	if err := os.MkdirAll(filepath.Join(home, "config"), 0o755); err != nil {

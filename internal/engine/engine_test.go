@@ -132,7 +132,7 @@ repositories:
 	}
 }
 
-func TestInstallEndToEnd(t *testing.T) {
+func TestMakeEndToEnd(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(rpmHandler))
 	defer srv.Close()
 	home := t.TempDir()
@@ -144,13 +144,13 @@ repositories:
     backend: rpm
     upstream:
       url: %s
-    install:
+    input:
       packages: [vim]
 `, home, srv.URL)
 	cfg := loadConfig(t, home, content)
 	r := &cfg.Repositories[0]
 	variants, _ := repo.Expand(cfg, r)
-	res, err := Install(t.Context(), cfg, &variants[0])
+	res, err := Make(t.Context(), cfg, &variants[0])
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -206,7 +206,7 @@ func debHandler(w http.ResponseWriter, r *http.Request) {
 	http.NotFound(w, r)
 }
 
-func TestInstallDEBEndToEnd(t *testing.T) {
+func TestMakeDEBEndToEnd(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(debHandler))
 	defer srv.Close()
 	home := t.TempDir()
@@ -222,13 +222,13 @@ repositories:
         - suite: bookworm
           components: [main]
       arch: [amd64]
-    install:
+    input:
       packages: [app]
 `, home, srv.URL)
 	cfg := loadConfig(t, home, content)
 	r := &cfg.Repositories[0]
 	variants, _ := repo.Expand(cfg, r)
-	res, err := Install(t.Context(), cfg, &variants[0])
+	res, err := Make(t.Context(), cfg, &variants[0])
 	if err != nil {
 		t.Fatal(err)
 	}

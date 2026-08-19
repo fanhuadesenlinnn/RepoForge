@@ -11,14 +11,12 @@ const longDescription = `RepoForge 是跨平台（Windows/Linux/macOS）Linux �
 
 新式命令（单文件 repo.yaml 配置，纯 Go，不依赖本机源）：
   repoforge sync      全量镜像上游仓库
-  repoforge install   按需制作离线源（指定软件 + 自动依赖求解）
+  repoforge make      按需制作离线源（点名 / 本地补齐依赖 / 升级）
   repoforge client    生成客户端 yum/apt 源配置
 
-传统命令（多文件 profile 配置）：
+其他命令：
   repoforge init
   repoforge check
-  repoforge make
-  repoforge make-upgrade
   repoforge use
   repoforge server start
 `
@@ -41,7 +39,6 @@ func newRootCommand() *cobra.Command {
 		newMakeCommand(),
 		newMakeUpgradeCommand(),
 		newSyncCommand(),
-		newInstallCommand(),
 		newClientCommand(),
 		newListCommand(),
 		newUseCommand(),

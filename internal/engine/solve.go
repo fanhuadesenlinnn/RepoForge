@@ -12,6 +12,10 @@ type SolveOptions struct {
 	Backend  string   // rpm | deb
 	Archs    []string // allowed architectures (empty = all)
 	WeakDeps bool     // include Recommends
+	// PreProvided lists package names already available locally (e.g. from
+	// input.package_dirs). They are treated as satisfied — not re-downloaded —
+	// but their dependencies are still resolved and fetched.
+	PreProvided []string
 }
 
 // Solve computes the set of package locations needed to satisfy the requested
@@ -46,6 +50,25 @@ func Solve(ix *upstream.Index, request []string, opt SolveOptions) (map[string]u
 
 	for _, name := range request {
 		queue = append(queue, upstream.DependencyEntry{Name: name})
+	}
+
+	// Pre-provided (local) packages are already available; mark them satisfied
+	// and enqueue their dependencies for resolution.
+	for _, name := range opt.PreProvided {
+		pkgs := providers(ix, name, archOK)
+		if len(pkgs) == 0 {
+			notices = append(notices, fmt.Sprintf("本地已有包 %q 未在上游找到（仅复制自身，不补外部依赖）", name))
+			continue
+		}
+		best := chooseBest(pkgs, upstream.DependencyEntry{Name: name}, opt.Backend)
+		if best == nil {
+			continue
+		}
+		selected[name] = *best
+		addedLoc[best.Location] = true
+		for _, r := range best.Requires {
+			queue = append(queue, r)
+		}
 	}
 
 	for len(queue) > 0 {
@@ -322,38 +345,40 @@ func pkgNewer(a, b upstream.Pkg, backend string) int {
 // provides them. primary.xml does not list file provides, so we resolve the
 // well-known ones here to keep dependency solving complete.
 var fileProvider = map[string]string{
-	"/bin/sh":                "bash",
-	"/usr/bin/sh":            "bash",
-	"/usr/bin/bash":          "bash",
-	"/bin/bash":              "bash",
-	"/usr/bin/perl":          "perl",
-	"/sbin/ldconfig":         "glibc",
-	"/usr/sbin/ldconfig":     "glibc",
-	"/usr/bin/which":         "which",
-	"/bin/which":             "which",
-	"/sbin/install-info":     "info",
-	"/usr/sbin/install-info": "info",
-	"/usr/bin/install-info":  "info",
-	"/bin/cp":                "coreutils",
-	"/bin/mv":                "coreutils",
-	"/bin/rm":                "coreutils",
-	"/usr/bin/cp":            "coreutils",
-	"/usr/bin/env":           "coreutils",
-	"/usr/bin/find":          "findutils",
-	"/bin/find":              "findutils",
-	"/usr/bin/awk":           "gawk",
-	"/bin/awk":               "gawk",
-	"/bin/mount":             "util-linux",
-	"/usr/bin/grep":          "grep",
-	"/bin/grep":              "grep",
-	"/usr/bin/sed":           "sed",
-	"/bin/sed":               "sed",
-	"/usr/bin/tar":           "tar",
-	"/bin/tar":               "tar",
-	"/usr/bin/file":          "file",
-	"/bin/file":              "file",
-	"/usr/bin/xargs":         "findutils",
-	"/bin/xargs":             "findutils",
-	"/usr/bin/gpg2":          "gnupg2",
-	"/bin/gpg2":              "gnupg2",
+	"/bin/sh":                       "bash",
+	"/usr/bin/sh":                   "bash",
+	"/usr/bin/bash":                 "bash",
+	"/bin/bash":                     "bash",
+	"/usr/bin/perl":                 "perl",
+	"/sbin/ldconfig":                "glibc",
+	"/usr/sbin/ldconfig":            "glibc",
+	"/usr/bin/which":                "which",
+	"/bin/which":                    "which",
+	"/sbin/install-info":            "info",
+	"/usr/sbin/install-info":        "info",
+	"/usr/bin/install-info":         "info",
+	"/bin/cp":                       "coreutils",
+	"/bin/mv":                       "coreutils",
+	"/bin/rm":                       "coreutils",
+	"/usr/bin/cp":                   "coreutils",
+	"/usr/bin/env":                  "coreutils",
+	"/usr/bin/find":                 "findutils",
+	"/bin/find":                     "findutils",
+	"/usr/bin/awk":                  "gawk",
+	"/bin/awk":                      "gawk",
+	"/bin/mount":                    "util-linux",
+	"/usr/bin/grep":                 "grep",
+	"/bin/grep":                     "grep",
+	"/usr/bin/sed":                  "sed",
+	"/bin/sed":                      "sed",
+	"/usr/bin/tar":                  "tar",
+	"/bin/tar":                      "tar",
+	"/usr/bin/file":                 "file",
+	"/bin/file":                     "file",
+	"/usr/bin/xargs":                "findutils",
+	"/bin/xargs":                    "findutils",
+	"/usr/bin/gpg2":                 "gnupg2",
+	"/bin/gpg2":                     "gnupg2",
+	"/usr/sbin/update-alternatives": "chkconfig",
+	"/etc/crypto-policies/back-ends/krb5.config": "crypto-policies",
 }

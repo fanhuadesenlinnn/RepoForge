@@ -38,7 +38,7 @@ func Make(ctx context.Context, cfg *repo.Config, ev *repo.Expanded) (*MakeResult
 		return nil, err
 	}
 	// Load the aggregated index across all aggregate sources.
-	ix, err := loadIndex(ctx, ev)
+	ix, err := loadIndex(ctx, ev, true)
 	if err != nil {
 		return nil, err
 	}
@@ -108,7 +108,7 @@ func Make(ctx context.Context, cfg *repo.Config, ev *repo.Expanded) (*MakeResult
 			Size:     p.Size,
 		})
 	}
-	d := newDownloader(r.Sync.Concurrency, r.Sync.MaxSegments, r.Sync.SegmentThreshold, true)
+	d := newDownloader(r.Sync.Concurrency, r.Sync.Segment, r.Sync.SegmentThreshold, true)
 	downloaded, errs := d.runAll(ctx, items)
 	problems = append(problems, errs...)
 

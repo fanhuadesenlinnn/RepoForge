@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+
+	"github.com/fanhuadesenlinnn/RepoForge/internal/repo"
 )
 
 // TestResume verifies that an interrupted download resumes via Range and passes
@@ -43,7 +45,7 @@ func TestResume(t *testing.T) {
 	dst := filepath.Join(dir, "pkg.rpm")
 	part := partPath(dst)
 
-	d := newDownloader(2, 8, 20, true)
+	d := newDownloader(2, repo.SegmentMode(8), 20, true)
 
 	// First call (no partial) should do a full request.
 	if err := d.fetch(t.Context(), srv.URL, dst, checksum, int64(len(content))); err != nil {

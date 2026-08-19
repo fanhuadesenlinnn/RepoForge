@@ -11,7 +11,9 @@ import (
 // loadIndex loads and merges the upstream index for an expanded variant. When
 // the variant has multiple aggregate sources (e.g. BaseOS+AppStream), all are
 // loaded and merged so dependency solving can draw from any of them.
-func loadIndex(ctx context.Context, ev *repo.Expanded) (*upstream.Index, error) {
+// needFilelists includes filelists.xml (for dependency resolution); pure
+// mirroring passes false to avoid fetching the large filelists unnecessarily.
+func loadIndex(ctx context.Context, ev *repo.Expanded, needFilelists bool) (*upstream.Index, error) {
 	backend := ev.Repository.Backend
 	seen := map[string]bool{} // dedupe by location
 	var merged []upstream.Pkg
@@ -21,7 +23,11 @@ func loadIndex(ctx context.Context, ev *repo.Expanded) (*upstream.Index, error) 
 		var ix *upstream.Index
 		var err error
 		if backend == "rpm" {
-			ix, err = upstream.RPMIndex(ctx, src.URL)
+			if needFilelists {
+				ix, err = upstream.RPMIndexForSolve(ctx, src.URL)
+			} else {
+				ix, err = upstream.RPMIndex(ctx, src.URL)
+			}
 		} else {
 			spec := upstream.DEBSpec{BaseURL: src.URL, Suites: debSuiteSpec(src.Suites)}
 			ix, err = upstream.DEBIndex(ctx, spec)

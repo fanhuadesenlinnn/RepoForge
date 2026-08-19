@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/fanhuadesenlinnn/RepoForge/internal/repo"
 )
 
 func TestSegmentedDownload(t *testing.T) {
@@ -47,7 +49,7 @@ func TestSegmentedDownload(t *testing.T) {
 	dir := t.TempDir()
 	dst := filepath.Join(dir, "big.rpm")
 
-	d := newDownloader(4, 8, 4, true)
+	d := newDownloader(4, repo.SegmentMode(8), 4, true)
 	if err := d.fetch(t.Context(), srv.URL, dst, checksum, int64(size)); err != nil {
 		t.Fatalf("segmented fetch: %v", err)
 	}
@@ -89,7 +91,7 @@ func TestSmallFileNotSegmented(t *testing.T) {
 	dir := t.TempDir()
 	dst := filepath.Join(dir, "small.rpm")
 	// threshold 20 MiB > size 2 MiB -> no segmentation.
-	d := newDownloader(4, 8, 20, true)
+	d := newDownloader(4, repo.SegmentSmart, 20, true)
 	if err := d.fetch(t.Context(), srv.URL, dst, checksum, int64(size)); err != nil {
 		t.Fatalf("fetch: %v", err)
 	}
@@ -132,4 +134,36 @@ func segmentCount(size, segSize int64, max int) int {
 		n = max
 	}
 	return n
+}
+
+func TestSegmentDisabled(t *testing.T) {
+	// A large file with segment disabled should use a single (non-Range)
+	// request — i.e. no segmentation.
+	size := 12 << 20 // 12 MiB
+	content := make([]byte, size)
+	for i := range content {
+		content[i] = byte(i % 251)
+	}
+	sum := sha256.Sum256(content)
+	checksum := hex.EncodeToString(sum[:])
+
+	var rangeReqs int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Range") != "" {
+			rangeReqs++
+			w.WriteHeader(http.StatusPartialContent)
+		}
+		w.Write(content)
+	}))
+	defer srv.Close()
+
+	dir := t.TempDir()
+	dst := filepath.Join(dir, "big.rpm")
+	d := newDownloader(4, repo.SegmentDisabled, 20, true)
+	if err := d.fetch(t.Context(), srv.URL, dst, checksum, int64(size)); err != nil {
+		t.Fatalf("fetch: %v", err)
+	}
+	if rangeReqs != 0 {
+		t.Fatalf("expected 0 Range requests when segment disabled, got %d", rangeReqs)
+	}
 }

@@ -9,8 +9,20 @@ import (
 	"strings"
 )
 
-// RPMIndex fetches and parses an RPM repository's metadata into a unified Index.
+// RPMIndex fetches and parses an RPM repository's metadata into a unified Index
+// (primary metadata only; no filelists). Use RPMIndexForSolve to also include
+// filelists for dependency resolution.
 func RPMIndex(ctx context.Context, baseURL string) (*Index, error) {
+	return rpmIndex(ctx, baseURL, false)
+}
+
+// RPMIndexForSolve fetches primary plus filelists.xml (when present) so
+// file-path dependencies can be resolved. Used by the make/install solver.
+func RPMIndexForSolve(ctx context.Context, baseURL string) (*Index, error) {
+	return rpmIndex(ctx, baseURL, true)
+}
+
+func rpmIndex(ctx context.Context, baseURL string, withFilelists bool) (*Index, error) {
 	base := strings.TrimRight(baseURL, "/")
 	repomdURL := base + "/repodata/repomd.xml"
 	data, err := Fetch(ctx, repomdURL)
@@ -46,12 +58,16 @@ func RPMIndex(ctx context.Context, baseURL string) (*Index, error) {
 		return nil, err
 	}
 
-	// Fetch + merge filelists.xml (if the repo provides it) so file-path
-	// dependencies (e.g. /usr/bin/killall) can be resolved precisely — the
-	// same way YUM uses filelists. Missing filelists is not an error.
-	if fh := findData(&rd, "filelists"); fh != "" {
-		if fl := fetchFilelists(ctx, base, fh); len(fl) > 0 {
-			mergeFilelists(pkgs, fl)
+	// Fetch + merge filelists.xml (when resolving dependencies and the repo
+	// provides it) so file-path dependencies (e.g. /usr/bin/killall) can be
+	// resolved precisely — the same way YUM uses filelists. Skipped for pure
+	// mirroring (sync) where dependency resolution is not needed, avoiding the
+	// extra large download on slow mirrors. Missing filelists is not an error.
+	if withFilelists {
+		if fh := findData(&rd, "filelists"); fh != "" {
+			if fl := fetchFilelists(ctx, base, fh); len(fl) > 0 {
+				mergeFilelists(pkgs, fl)
+			}
 		}
 	}
 

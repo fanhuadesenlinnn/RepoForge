@@ -168,8 +168,8 @@ func applyDefaults(home string, cfg *Config) {
 		if r.Sync.SegmentThreshold <= 0 {
 			r.Sync.SegmentThreshold = 20 // MiB per segment
 		}
-		if r.Sync.MaxSegments <= 0 {
-			r.Sync.MaxSegments = 8
+		if r.Sync.Segment == 0 {
+			r.Sync.Segment = SegmentSmart // absent → smart default
 		}
 		if r.Dependency.Conflicts == "" {
 			r.Dependency.Conflicts = "report"

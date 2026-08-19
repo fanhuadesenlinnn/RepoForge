@@ -194,3 +194,34 @@ repositories:
 		t.Fatalf("source1 URL = %q", ev.Sources[1].URL)
 	}
 }
+
+func TestSegmentModeParsing(t *testing.T) {
+	cases := []struct {
+		yaml string
+		want SegmentMode
+	}{
+		{"segment: false", SegmentDisabled},
+		{"segment: 4", 4},
+		{"segment: true", SegmentSmart},
+		{"", SegmentSmart}, // absent → defaulted to smart in Load
+		{"segment: 12", 12},
+	}
+	for _, c := range cases {
+		home := t.TempDir()
+		content := "schema_version: 2\npaths:\n  repo_dir: " + home + "/repos\nrepositories:\n  - name: x\n    backend: rpm\n    upstream:\n      url: http://e.invalid/x\n    sync:\n      enabled: true\n      " + c.yaml + "\n"
+		if err := os.MkdirAll(filepath.Join(home, "config"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(home, "config", "repo.yaml"), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := Load(home)
+		if err != nil {
+			t.Fatalf("yaml=%q err=%v", c.yaml, err)
+		}
+		got := cfg.Repositories[0].Sync.Segment
+		if got != c.want {
+			t.Errorf("yaml=%q segment=%v, want %v", c.yaml, got, c.want)
+		}
+	}
+}

@@ -6,6 +6,12 @@
 // and distribution settings. Nothing relies on a host yum/apt.
 package repo
 
+import (
+	"errors"
+
+	"gopkg.in/yaml.v3"
+)
+
 // ConfigSchema is the single-file schema version.
 const ConfigSchema = 2
 
@@ -119,12 +125,61 @@ type Sync struct {
 	// Concurrency controls how many files download in parallel (multi-file).
 	Concurrency int `yaml:"concurrency"`
 	// SegmentThreshold is the base segment size (MiB). A single file larger
-	// than this is split into ceil(size/threshold) segments automatically,
-	// capped at MaxSegments. No per-file segment count needs to be configured.
+	// than this is split into segment(s) when segmentation is enabled.
 	SegmentThreshold int64 `yaml:"segment_threshold"`
-	// MaxSegments caps how many concurrent Range segments a single file uses.
-	MaxSegments int  `yaml:"max_segments"`
-	Resume      bool `yaml:"resume"`
+	// Segment is both a switch and a cap:
+	//   false       → segmentation disabled (single connection per file)
+	//   <n> (int)   → enabled, at most n segments per large file
+	//   absent/true → smart default (auto segments, capped at 8)
+	Segment SegmentMode `yaml:"segment"`
+	Resume  bool        `yaml:"resume"`
+}
+
+// SegmentMode holds the segment setting.
+//
+//	 0  → unset (absent); load defaults it to smart
+//	-1  → smart default (auto segments, capped)
+//	-2  → disabled (false): single connection per file
+//	>0  → fixed max segments per large file
+type SegmentMode int
+
+const (
+	SegmentSmart    SegmentMode = -1
+	SegmentDisabled SegmentMode = -2
+)
+
+// UnmarshalYAML accepts false, true, an integer, or null.
+func (s *SegmentMode) UnmarshalYAML(value *yaml.Node) error {
+	if value.Kind == yaml.ScalarNode {
+		switch value.Tag {
+		case "!!bool":
+			var b bool
+			if err := value.Decode(&b); err != nil {
+				return err
+			}
+			if b {
+				*s = SegmentSmart // true → smart default
+			} else {
+				*s = SegmentDisabled // false → disabled
+			}
+			return nil
+		case "!!int":
+			var n int
+			if err := value.Decode(&n); err != nil {
+				return err
+			}
+			if n < 2 {
+				*s = SegmentSmart // 0/1 → treat as smart default
+			} else {
+				*s = SegmentMode(n)
+			}
+			return nil
+		case "!!null":
+			*s = SegmentSmart
+			return nil
+		}
+	}
+	return errors.New("segment 需要 false / 正整数 / 缺省")
 }
 
 // Input holds the make command's starting points. Multiple may be set; the

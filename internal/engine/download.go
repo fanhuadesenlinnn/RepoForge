@@ -15,32 +15,33 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/fanhuadesenlinnn/RepoForge/internal/repo"
 	"github.com/fanhuadesenlinnn/RepoForge/internal/upstream"
 )
 
 // downloader downloads packages with bounded concurrency and checksum verify.
 type downloader struct {
-	client      *http.Client
-	jobs        int   // multi-file parallel count
-	maxSegments int   // cap on segments per large file
-	segSize     int64 // base bytes per segment (default 20 MiB)
-	resume      bool
+	client  *http.Client
+	jobs    int              // multi-file parallel count
+	segment repo.SegmentMode // segment mode: Disabled / Smart / fixed cap
+	segSize int64            // base bytes per segment (default 20 MiB)
+	resume  bool
 }
 
 // newDownloader takes the multi-file concurrency, the per-segment size in MiB,
-// and the max segments cap. Segments per file are computed automatically:
-// ceil(fileSize/segSize) capped at maxSegments.
-func newDownloader(jobs, maxSegments int, segSizeMiB int64, resume bool) *downloader {
+// and a segment mode (repo.SegmentMode): Smart=auto, Disabled=off, or a fixed
+// cap. A fixed cap of n means a large file is split into at most n segments.
+func newDownloader(jobs int, segment repo.SegmentMode, segSizeMiB int64, resume bool) *downloader {
 	if jobs < 1 {
 		jobs = 4
 	}
-	if maxSegments < 1 {
-		maxSegments = 8
+	if segment == 0 {
+		segment = repo.SegmentSmart
 	}
 	if segSizeMiB <= 0 {
 		segSizeMiB = 20
 	}
-	return &downloader{client: upstream.NewClient(), jobs: jobs, maxSegments: maxSegments, segSize: segSizeMiB << 20, resume: resume}
+	return &downloader{client: upstream.NewClient(), jobs: jobs, segment: segment, segSize: segSizeMiB << 20, resume: resume}
 }
 
 // partPath returns a stable temp path so an interrupted download can resume.
@@ -60,8 +61,9 @@ func (d *downloader) fetch(ctx context.Context, url, dst, checksum string, size 
 	if st, err := os.Stat(part); err == nil && d.resume && !st.IsDir() {
 		have = st.Size()
 	}
-	// For fresh big files (>= one segment), download with segmented parallel.
-	if have == 0 && size >= d.segSize && d.maxSegments > 1 {
+	// Segment big files when segmentation is enabled (smart or fixed cap).
+	// When explicitly disabled (SegmentDisabled), always use a single connection.
+	if have == 0 && size >= d.segSize && d.segment != repo.SegmentDisabled && d.segment != 0 {
 		if err := d.segmentedFetch(ctx, url, part, size, checksum); err == nil {
 			return os.Rename(part, dst)
 		}
@@ -181,14 +183,23 @@ func (d *downloader) segmentedFetch(ctx context.Context, url, dst string, size i
 		return err
 	}
 
-	// Segment count grows with file size but is capped: ceil(size/segSize),
-	// at most maxSegments. Guarantees progress and avoids thread explosion.
+	// Segment count: maximum cap is the fixed value when set, else the smart
+	// default (8). Actual count = ceil(size/segSize), capped at that maximum.
+	maxSegs := 8
+	if d.segment > 0 {
+		maxSegs = int(d.segment)
+	} else if d.segment != repo.SegmentSmart {
+		maxSegs = 1 // disabled or unknown — a single segment
+	}
 	n := int((size + d.segSize - 1) / d.segSize)
 	if n < 2 {
 		n = 2
 	}
-	if n > d.maxSegments {
-		n = d.maxSegments
+	if n > maxSegs {
+		n = maxSegs
+	}
+	if n < 1 {
+		n = 1
 	}
 	segSize := size / int64(n)
 	if segSize < 1 {

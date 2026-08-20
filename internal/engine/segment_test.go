@@ -52,7 +52,7 @@ func TestSegmentedDownload(t *testing.T) {
 	dst := filepath.Join(dir, "big.rpm")
 
 	d := newDownloader(4, repo.SegmentMode(8), 4, true)
-	if err := d.fetch(context.Background(), srv.URL, dst, checksum, int64(size)); err != nil {
+	if err := d.fetch(context.Background(), srv.URL, dst, checksum, "sha256", int64(size)); err != nil {
 		t.Fatalf("segmented fetch: %v", err)
 	}
 	if rangeCount.Load() < 2 {
@@ -94,7 +94,7 @@ func TestSmallFileNotSegmented(t *testing.T) {
 	dst := filepath.Join(dir, "small.rpm")
 	// threshold 20 MiB > size 2 MiB -> no segmentation.
 	d := newDownloader(4, repo.SegmentSmart, 20, true)
-	if err := d.fetch(context.Background(), srv.URL, dst, checksum, int64(size)); err != nil {
+	if err := d.fetch(context.Background(), srv.URL, dst, checksum, "sha256", int64(size)); err != nil {
 		t.Fatalf("fetch: %v", err)
 	}
 	if rangeReqs != 0 {
@@ -162,7 +162,7 @@ func TestSegmentDisabled(t *testing.T) {
 	dir := t.TempDir()
 	dst := filepath.Join(dir, "big.rpm")
 	d := newDownloader(4, repo.SegmentDisabled, 20, true)
-	if err := d.fetch(context.Background(), srv.URL, dst, checksum, int64(size)); err != nil {
+	if err := d.fetch(context.Background(), srv.URL, dst, checksum, "sha256", int64(size)); err != nil {
 		t.Fatalf("fetch: %v", err)
 	}
 	if rangeReqs != 0 {

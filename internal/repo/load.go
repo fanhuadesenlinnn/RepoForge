@@ -137,6 +137,11 @@ func applyDefaults(home string, cfg *Config) {
 	if cfg.Server.Systemd.Restart == "" {
 		cfg.Server.Systemd.Restart = "always"
 	}
+	if cfg.Signing.PrivateKey == "" {
+		cfg.Signing.PrivateKey = filepath.Join(home, "config", "signing", "private.key")
+	} else {
+		cfg.Signing.PrivateKey = expandHome(home, cfg.Signing.PrivateKey)
+	}
 	if cfg.Server.Root == "" {
 		cfg.Server.Root = cfg.Paths.RepoDir
 	}
@@ -203,6 +208,11 @@ func validate(cfg *Config) error {
 		case "keep", "prune", "prune-expired":
 		default:
 			return fmt.Errorf("repository %q 的 delete_policy %q 无效（keep|prune|prune-expired）", r.Name, r.Sync.DeletePolicy)
+		}
+		switch r.Dependency.Conflicts {
+		case "report", "resolve":
+		default:
+			return fmt.Errorf("repository %q 的 dependency.conflicts %q 无效（report|resolve）", r.Name, r.Dependency.Conflicts)
 		}
 		if !r.Sync.Enabled && len(r.Input.Packages) == 0 &&
 			len(r.Input.PackageDirs) == 0 && len(r.Input.UpgradePackages) == 0 {

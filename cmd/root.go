@@ -43,6 +43,7 @@ func newRootCommand() *cobra.Command {
 		newListCommand(),
 		newUseCommand(),
 		newServerCommand(),
+		newGPGCommand(),
 	)
 	return root
 }

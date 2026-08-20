@@ -43,6 +43,11 @@ server:                     # HTTP 分发服务（可选）
     enabled: true
     service_name: repoforge-server
 
+signing:                    # OpenPGP 签名（可选）
+  enabled: false            # true = 签名生成的 repodata / Release 元数据
+  # private_key: ${home}/config/signing/private.key   # 缺省路径，无需填写
+  # 生成密钥：repoforge gpg init ；导出公钥：repoforge gpg export
+
 # ============================================================
 # 仓库定义（核心）—— 下面的都是可复制改用的例子
 # ============================================================
@@ -64,11 +69,12 @@ repositories:
           vars:
             - name: basearch
               value: x86_64
-      verify: sha256          # 校验方式，保持 sha256
+      verify: auto            # 校验方式：auto=按上游元数据声明（sha256/sha1/md5）；也可强制 sha256|sha1|md5
     input:
       packages: [vim, curl]   # ← 把想做的软件写这里，可多可少
     dependency:
       weak_deps: false        # false=只装硬依赖，true=连推荐依赖一起装
+      conflicts: report       # report=版本冲突报错；resolve=尝试找满足全部约束的版本
 
   # 例2：RPM 多仓库聚合（真实 CentOS 需要 BaseOS + AppStream）
   #   vim 在 AppStream，基础库 glibc 在 BaseOS，两个源都要才能解全依赖。
@@ -101,7 +107,8 @@ repositories:
   #         value: "9"
   #   sync:
   #     enabled: true
-  #     delete_policy: keep      # keep=只增不删；prune=删除上游已下线包
+  #     delete_policy: keep      # keep=只增不删；prune=删除上游已下线包；prune-expired=只删超过 expire_days 天的下线包
+  #     expire_days: 30          # prune-expired 的宽限期（天），缺省 30
   #     concurrency: 8           # 多文件并行数（官方麒麟源会自动降到 2）
   #     segment_threshold: 20    # 单文件分段基准 MiB
   #     segment: 8               # false=不分片只用多文件并行；数字=单文件分段上限；缺省=智能(默认8)；麒麟源自动关闭

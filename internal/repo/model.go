@@ -23,6 +23,7 @@ type Config struct {
 	App           App          `yaml:"app"`
 	Paths         Paths        `yaml:"paths"`
 	Server        Server       `yaml:"server"`
+	Signing       Signing      `yaml:"signing"`
 	Repositories  []Repository `yaml:"repositories"`
 }
 
@@ -40,6 +41,15 @@ type Paths struct {
 	ClientDir   string `yaml:"client_dir"`
 	LogDir      string `yaml:"log_dir"`
 	TemplateDir string `yaml:"template_dir"`
+}
+
+// Signing holds OpenPGP signing settings for generated repository metadata
+// (repomd.xml.asc for yum, Release/InRelease for apt).
+type Signing struct {
+	Enabled bool `yaml:"enabled"`
+	// PrivateKey is the path to the ASCII-armored OpenPGP private key used to
+	// sign. Empty defaults to ${home}/config/signing/private.key.
+	PrivateKey string `yaml:"private_key"`
 }
 
 // Server holds HTTP distribution settings.
@@ -199,6 +209,9 @@ type Suite struct {
 type Sync struct {
 	Enabled      bool   `yaml:"enabled"`
 	DeletePolicy string `yaml:"delete_policy"` // keep | prune | prune-expired
+	// ExpireDays is the grace period (days) before prune-expired removes a
+	// package that upstream no longer provides. 0 = default (30).
+	ExpireDays int `yaml:"expire_days"`
 	// Concurrency controls how many files download in parallel (multi-file).
 	Concurrency int `yaml:"concurrency"`
 	// SegmentThreshold is the base segment size (MiB). A single file larger

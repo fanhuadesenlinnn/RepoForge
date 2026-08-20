@@ -5,10 +5,13 @@ package engine
 
 import (
 	"context"
+	"crypto/md5"
+	"crypto/sha1"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"hash"
 	"io"
 	"net/http"
 	"os"
@@ -74,9 +77,36 @@ func partPath(dst string) string {
 	return filepath.Join(filepath.Dir(dst), "."+filepath.Base(dst)+".part")
 }
 
+// newHasher returns the digest hasher for a verify algorithm (sha256|sha1|md5).
+func newHasher(alg string) hash.Hash {
+	switch strings.ToLower(alg) {
+	case "sha1":
+		return sha1.New()
+	case "md5":
+		return md5.New()
+	default:
+		return sha256.New()
+	}
+}
+
+// verifyAlg resolves the effective checksum algorithm: an explicit verify
+// mode (sha256|sha1|md5) wins; "auto" uses the algorithm the metadata
+// declared for this package, falling back to sha256.
+func verifyAlg(mode, pkgType string) string {
+	switch strings.ToLower(mode) {
+	case "sha1", "md5", "sha256":
+		return strings.ToLower(mode)
+	default: // auto / empty
+		if t := strings.ToLower(pkgType); t == "sha1" || t == "md5" || t == "sha256" {
+			return t
+		}
+		return "sha256"
+	}
+}
+
 // fetch one package: supports resuming from a partial download and verifies
 // size + checksum when provided.
-func (d *downloader) fetch(ctx context.Context, url, dst, checksum string, size int64) error {
+func (d *downloader) fetch(ctx context.Context, url, dst, checksum, verifyAlg string, size int64) error {
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return err
 	}
@@ -89,7 +119,7 @@ func (d *downloader) fetch(ctx context.Context, url, dst, checksum string, size 
 	// Segment big files when segmentation is enabled (smart or fixed cap).
 	// When explicitly disabled (SegmentDisabled), always use a single connection.
 	if have == 0 && size >= d.segSize && d.segment != repo.SegmentDisabled && d.segment != 0 {
-		if err := d.segmentedFetch(ctx, url, part, size, checksum); err == nil {
+		if err := d.segmentedFetch(ctx, url, part, size, checksum, verifyAlg); err == nil {
 			return os.Rename(part, dst)
 		}
 		os.Remove(part) // fall through to single connection on any failure
@@ -100,7 +130,7 @@ func (d *downloader) fetch(ctx context.Context, url, dst, checksum string, size 
 	// keeping any partial bytes so a mid-file stall can resume via Range.
 	var lastErr error
 	for attempt := 0; attempt <= 2; attempt++ {
-		lastErr = d.singleFetch(ctx, url, part, have, checksum, size)
+		lastErr = d.singleFetch(ctx, url, part, have, checksum, verifyAlg, size)
 		if lastErr == nil {
 			return os.Rename(part, dst)
 		}
@@ -139,7 +169,7 @@ func (e shortSizeError) Error() string {
 }
 
 // singleFetch performs one request+write of a single-connection download.
-func (d *downloader) singleFetch(ctx context.Context, url, part string, have int64, checksum string, size int64) error {
+func (d *downloader) singleFetch(ctx context.Context, url, part string, have int64, checksum, verifyAlg string, size int64) error {
 	if err := os.MkdirAll(filepath.Dir(part), 0o755); err != nil {
 		return err
 	}
@@ -176,7 +206,7 @@ func (d *downloader) singleFetch(ctx context.Context, url, part string, have int
 			return err
 		}
 	}
-	hasher := sha256.New()
+	hasher := newHasher(verifyAlg)
 	var n int64
 	if have > 0 {
 		f.Seek(0, io.SeekStart)
@@ -206,7 +236,7 @@ func (d *downloader) singleFetch(ctx context.Context, url, part string, have int
 		return shortSizeError{got: n, want: size}
 	}
 	if checksum != "" && !strings.EqualFold(hex.EncodeToString(hasher.Sum(nil)), checksum) {
-		return fmt.Errorf("SHA256 校验失败")
+		return fmt.Errorf("%s 校验失败", strings.ToUpper(verifyAlg))
 	}
 	return nil
 }
@@ -215,7 +245,7 @@ func (d *downloader) singleFetch(ctx context.Context, url, part string, have int
 // Range requests, each writing to its own offset in the output file. It returns
 // an error (so the caller can fall back) if Range is unsupported or any segment
 // fails.
-func (d *downloader) segmentedFetch(ctx context.Context, url, dst string, size int64, checksum string) error {
+func (d *downloader) segmentedFetch(ctx context.Context, url, dst string, size int64, checksum, verifyAlg string) error {
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return err
 	}
@@ -340,14 +370,14 @@ func (d *downloader) segmentedFetch(ctx context.Context, url, dst string, size i
 	}
 	if checksum != "" {
 		out.Seek(0, io.SeekStart)
-		h := sha256.New()
+		h := newHasher(verifyAlg)
 		if _, err := io.Copy(h, out); err != nil {
 			os.Remove(dst)
 			return err
 		}
 		if !strings.EqualFold(hex.EncodeToString(h.Sum(nil)), checksum) {
 			os.Remove(dst)
-			return fmt.Errorf("分段下载 SHA256 校验失败")
+			return fmt.Errorf("分段下载 %s 校验失败", strings.ToUpper(verifyAlg))
 		}
 	}
 	return nil
@@ -375,7 +405,7 @@ func (d *downloader) runAll(ctx context.Context, items []downloadItem) (download
 			case <-ctx.Done():
 				return
 			}
-			err := d.fetch(ctx, it.URL, it.Dst, it.Checksum, it.Size)
+			err := d.fetch(ctx, it.URL, it.Dst, it.Checksum, it.VerifyAlg, it.Size)
 			mu.Lock()
 			done++
 			n := done
@@ -402,14 +432,16 @@ func (d *downloader) runAll(ctx context.Context, items []downloadItem) (download
 }
 
 type downloadItem struct {
-	URL      string
-	Dst      string
-	Checksum string
-	Size     int64
+	URL       string
+	Dst       string
+	Checksum  string
+	VerifyAlg string
+	Size      int64
 }
 
 // downloadNeeded splits packages into (to download, skipped) based on local state.
-func planDownloads(ix *upstream.Index, root string, prev state) (items []downloadItem, skipped int) {
+// verifyMode is the repo's upstream.verify (auto|sha256|sha1|md5).
+func planDownloads(ix *upstream.Index, root string, prev state, verifyMode string) (items []downloadItem, skipped int) {
 	for _, p := range ix.Packages {
 		loc := strings.TrimPrefix(p.Location, "/")
 		dst := filepath.Join(root, filepath.FromSlash(loc))
@@ -423,10 +455,11 @@ func planDownloads(ix *upstream.Index, root string, prev state) (items []downloa
 			}
 		}
 		items = append(items, downloadItem{
-			URL:      pkgURL(ix, p),
-			Dst:      dst,
-			Checksum: p.Checksum,
-			Size:     p.Size,
+			URL:       pkgURL(ix, p),
+			Dst:       dst,
+			Checksum:  p.Checksum,
+			VerifyAlg: verifyAlg(verifyMode, p.ChecksumType),
+			Size:      p.Size,
 		})
 	}
 	return items, skipped

@@ -269,6 +269,27 @@ func buildRepomd(files []repoDataFile) []byte {
 
 // ---- DEB: write Packages file ----
 
+func checksumType(t string) string {
+	switch strings.ToLower(t) {
+	case "sha1", "md5":
+		return strings.ToLower(t)
+	default:
+		return "sha256"
+	}
+}
+
+// debChecksumField maps a checksum algorithm to the Packages file field name.
+func debChecksumField(alg string) string {
+	switch strings.ToLower(alg) {
+	case "sha1":
+		return "SHA1"
+	case "md5":
+		return "MD5sum"
+	default:
+		return "SHA256"
+	}
+}
+
 func genDEBPackages(_ context.Context, root string, subset []upstream.Pkg) (string, error) {
 	var b strings.Builder
 	for _, p := range subset {
@@ -283,7 +304,9 @@ func genDEBPackages(_ context.Context, root string, subset []upstream.Pkg) (stri
 		fmt.Fprintf(&b, "Version: %s\n", ver)
 		fmt.Fprintf(&b, "Architecture: %s\n", archOrDefault(p.Arch))
 		fmt.Fprintf(&b, "Filename: %s\n", strings.TrimPrefix(p.Location, "/"))
-		fmt.Fprintf(&b, "SHA256: %s\n", p.Checksum)
+		if p.Checksum != "" {
+			fmt.Fprintf(&b, "%s: %s\n", debChecksumField(p.ChecksumType), p.Checksum)
+		}
 		fmt.Fprintf(&b, "Size: %d\n", p.Size)
 		if p.Summary != "" {
 			fmt.Fprintf(&b, "Description: %s\n", strings.ReplaceAll(p.Summary, "\n", " "))

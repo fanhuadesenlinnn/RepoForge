@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- 新增：OpenPGP 签名（纯 Go，无 gpg 依赖）——`repoforge gpg init` 生成 Ed25519 密钥对，`gpg export` 导出公钥；`signing.enabled: true` 后 sync/make 自动签名：RPM 生成 `repomd.xml.asc`（yum repo_gpgcheck），DEB 生成 `Release` / `InRelease` / `Release.gpg`（apt Signed-By）。
+- 新增：zstd 压缩元数据支持——Fedora 39+ / openSUSE / 新版 EPEL 的 primary.xml.zst 与 DEB Packages.zst 均可解析（此前直接报错）。
+- 新增：`sync.delete_policy: prune-expired` 真正实现——配合 `sync.expire_days`（缺省 30 天），只删除上游已下线且本地副本超过宽限期的包，给客户端缓存留出缓冲期（此前与 prune 行为相同）。
+- 新增：`dependency.conflicts: resolve`——两个包把同一依赖钉在不同版本时，尝试寻找同时满足全部约束的单一版本；无法满足才报错（report 维持原行为）。
+- 新增：`upstream.verify` 落实——`auto`（缺省）按上游元数据声明的算法校验（sha256/sha1/md5），也可强制 `sha256|sha1|md5`；生成的 primary.xml / Packages 按实际算法输出。
+
 ## v1.3.0
 
 - 新增：跨架构补全——`input.package_dirs` 只含一种架构时，其他架构自动从上游拉取同名包 + 依赖（`input.packages`/`upgrade_packages` 同样支持）；上游没有对应架构版本的第三方包降级为提示，不再报错。

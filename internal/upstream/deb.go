@@ -73,13 +73,10 @@ func readDEBPackages(ctx context.Context, base, suite, comp, arch string) ([]Pkg
 	tried := []string{}
 	for _, suffix := range []string{"", ".gz", ".zst"} {
 		url := base + "/" + rel + suffix
-		if suffix == ".zst" {
-			continue // zstd unsupported for now
-		}
 		data, err = Fetch(ctx, url)
 		if err == nil {
-			if suffix == ".gz" {
-				if d, gerr := decompressAny(data, rel+".gz"); gerr == nil {
+			if suffix == ".gz" || suffix == ".zst" {
+				if d, gerr := decompressAny(data, rel+suffix); gerr == nil {
 					data = d
 				}
 			}
@@ -133,13 +130,24 @@ func parseDEBPackages(baseURL, text string) ([]Pkg, error) {
 			fields[curKey] = strings.TrimSpace(line[idx+1:])
 		}
 		pkg := Pkg{
-			Name:      fields["Package"],
-			Version:   fields["Version"],
-			Arch:      fields["Architecture"],
-			Location:  fields["Filename"],
-			Checksum:  fields["SHA256"],
-			Summary:   fields["Description"],
-			MultiArch: fields["Multi-Arch"],
+			Name:         fields["Package"],
+			Version:      fields["Version"],
+			Arch:         fields["Architecture"],
+			Location:     fields["Filename"],
+			Checksum:     fields["SHA256"],
+			ChecksumType: "sha256",
+			Summary:      fields["Description"],
+			MultiArch:    fields["Multi-Arch"],
+		}
+		if pkg.Checksum == "" {
+			// Older Packages files may only carry SHA1 or MD5sum.
+			if c := fields["SHA1"]; c != "" {
+				pkg.Checksum, pkg.ChecksumType = c, "sha1"
+			} else if c := fields["MD5sum"]; c != "" {
+				pkg.Checksum, pkg.ChecksumType = c, "md5"
+			} else {
+				pkg.ChecksumType = ""
+			}
 		}
 		if n, err := strconv.ParseInt(fields["Size"], 10, 64); err == nil {
 			pkg.Size = n

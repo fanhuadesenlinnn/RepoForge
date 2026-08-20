@@ -78,6 +78,7 @@ func Make(ctx context.Context, cfg *repo.Config, ev *repo.Expanded) (*MakeResult
 		Backend:      r.Backend,
 		Archs:        archList(r, ev.Vars),
 		WeakDeps:     r.Dependency.WeakDeps,
+		Conflicts:    r.Dependency.Conflicts,
 		LocalPkgs:    localPkgs,
 		SoftRequests: softRequests,
 	}
@@ -122,10 +123,11 @@ func Make(ctx context.Context, cfg *repo.Config, ev *repo.Expanded) (*MakeResult
 			continue
 		}
 		items = append(items, downloadItem{
-			URL:      pkgURL(ix, p),
-			Dst:      dst,
-			Checksum: p.Checksum,
-			Size:     p.Size,
+			URL:       pkgURL(ix, p),
+			Dst:       dst,
+			Checksum:  p.Checksum,
+			VerifyAlg: verifyAlg(r.Upstream.Verify, p.ChecksumType),
+			Size:      p.Size,
 		})
 	}
 	d := newDownloader(r.Sync.Concurrency, r.Sync.Segment, r.Sync.SegmentThreshold, true)
@@ -137,6 +139,9 @@ func Make(ctx context.Context, cfg *repo.Config, ev *repo.Expanded) (*MakeResult
 	repodata, gerr := genRepodata(ctx, root, presentPkgs(root, subset), r.Backend)
 	if gerr != nil {
 		return nil, gerr
+	}
+	if serr := signRepodata(ctx, cfg, root, r.Backend); serr != nil {
+		return nil, serr
 	}
 
 	return &MakeResult{

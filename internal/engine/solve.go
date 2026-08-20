@@ -12,6 +12,11 @@ type SolveOptions struct {
 	Backend  string   // rpm | deb
 	Archs    []string // allowed architectures (empty = all)
 	WeakDeps bool     // include Recommends
+	// Conflicts controls what happens when two requirements pin the same
+	// name to incompatible versions: "report" keeps the first selection and
+	// records a problem; "resolve" searches for a single version that
+	// satisfies every recorded constraint before giving up.
+	Conflicts string // report | resolve
 	// PreProvided lists package names already available locally (e.g. from
 	// input.package_dirs). They are treated as satisfied — not re-downloaded —
 	// but their dependencies are still resolved and fetched.
@@ -39,6 +44,10 @@ func Solve(ix *upstream.Index, request []string, opt SolveOptions) (map[string]u
 	selected := map[string]upstream.Pkg{} // by provides-name -> package
 	addedLoc := map[string]bool{}
 	soft := map[string]bool{}
+	// constraints records every version constraint seen per name (RPM/DEB
+	// versioned requirements). The resolver uses them to find a package that
+	// satisfies all of them simultaneously.
+	constraints := map[string][]upstream.DependencyEntry{}
 	for _, n := range opt.SoftRequests {
 		soft[n] = true
 	}
@@ -112,6 +121,13 @@ func Solve(ix *upstream.Index, request []string, opt SolveOptions) (map[string]u
 		dep := queue[0]
 		queue = queue[1:]
 
+		// Record the constraint before resolution so the resolver can pick a
+		// version satisfying every requirement seen so far. File-path deps and
+		// unversioned requests carry no constraint.
+		if dep.Op != "" && dep.Version != "" && !strings.HasPrefix(dep.Name, "/") {
+			constraints[dep.Name] = appendUnique(constraints[dep.Name], dep)
+		}
+
 		// File-path requirement: match via the file list first (from
 		// filelists.xml). Fall back to the built-in fileProvider table when the
 		// repo has no filelists or the file was not listed.
@@ -178,6 +194,25 @@ func Solve(ix *upstream.Index, request []string, opt SolveOptions) (map[string]u
 				notices = append(notices, fmt.Sprintf("本地包 %s 优先于上游 %s（已保留本地版本）", prev.NEVRA(), best.NEVRA()))
 				continue
 			}
+			if opt.Conflicts == "resolve" {
+				// Try to find one candidate that satisfies every constraint
+				// recorded for this name (the version-pinning case: one package
+				// requires foo >= 2, another foo < 1.5 — if the repo carries a
+				// single version that satisfies both, pick it).
+				if r := resolveConflict(candidates, constraints[dep.Name], opt.Backend); r != nil {
+					selected[dep.Name] = *r
+					if !addedLoc[r.Location] {
+						addedLoc[r.Location] = true
+						queue = append(queue, r.Requires...)
+						if opt.WeakDeps {
+							queue = append(queue, r.Recommends...)
+						}
+					}
+					continue
+				}
+				problems = append(problems, fmt.Sprintf("依赖冲突: %s 同时要求 %s 和 %s（resolve 未找到满足全部约束的版本）", dep.Name, prev.NEVRA(), best.NEVRA()))
+				continue
+			}
 			problems = append(problems, fmt.Sprintf("依赖冲突: %s 同时要求 %s 和 %s", dep.Name, prev.NEVRA(), best.NEVRA()))
 			continue
 		}
@@ -203,6 +238,37 @@ func Solve(ix *upstream.Index, request []string, opt SolveOptions) (map[string]u
 	problems = downgradeSatisfied(dedupe(problems), selected)
 
 	return selected, dedupe(problems), dedupe(notices)
+}
+
+// appendUnique appends dep to list unless an identical entry already exists.
+func appendUnique(list []upstream.DependencyEntry, dep upstream.DependencyEntry) []upstream.DependencyEntry {
+	for _, e := range list {
+		if e.Name == dep.Name && e.Op == dep.Op && e.Version == dep.Version {
+			return list
+		}
+	}
+	return append(list, dep)
+}
+
+// resolveConflict returns the first candidate satisfying every recorded
+// constraint, or nil when no single version can satisfy all of them.
+func resolveConflict(cands []upstream.Pkg, constraints []upstream.DependencyEntry, backend string) *upstream.Pkg {
+	if len(constraints) == 0 {
+		return nil
+	}
+	for i := range cands {
+		ok := true
+		for _, d := range constraints {
+			if !satisfies(cands[i], d, backend) {
+				ok = false
+				break
+			}
+		}
+		if ok {
+			return &cands[i]
+		}
+	}
+	return nil
 }
 
 // downgradeSatisfied moves problems whose dependency is satisfiable by an

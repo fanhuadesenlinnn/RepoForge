@@ -38,7 +38,7 @@ func Sync(ctx context.Context, cfg *repo.Config, ev *repo.Expanded) (*SyncResult
 	}
 
 	prev := loadState(root)
-	items, skipped := planDownloads(ix, root, prev)
+	items, skipped := planDownloads(ix, root, prev, ev.Repository.Upstream.Verify)
 	d := newDownloader(ev.Repository.Sync.Concurrency, ev.Repository.Sync.Segment, ev.Repository.Sync.SegmentThreshold, ev.Repository.Sync.Resume)
 	d.applyFragileTune(expandedURLs(ev)...)
 	downloaded, errs := d.runAll(ctx, items)
@@ -48,6 +48,9 @@ func Sync(ctx context.Context, cfg *repo.Config, ev *repo.Expanded) (*SyncResult
 	if gerr != nil {
 		return nil, fmt.Errorf("生成索引失败: %w", gerr)
 	}
+	if serr := signRepodata(ctx, cfg, root, ev.Repository.Backend); serr != nil {
+		return nil, serr
+	}
 
 	// persistence: update state with all current packages.
 	st := state{Revision: fmt.Sprintf("%d", time.Now().Unix()), SyncedAt: time.Now(), Packages: map[string]string{}}
@@ -56,7 +59,10 @@ func Sync(ctx context.Context, cfg *repo.Config, ev *repo.Expanded) (*SyncResult
 	}
 
 	deleted := 0
-	if ev.Repository.Sync.DeletePolicy != "keep" && ev.Repository.Sync.DeletePolicy != "" {
+	switch ev.Repository.Sync.DeletePolicy {
+	case "prune-expired":
+		deleted = pruneExpired(root, prev.Packages, st.Packages, ev.Repository.Sync.ExpireDays)
+	case "prune":
 		deleted = pruneDeleted(root, prev.Packages, st.Packages)
 	}
 	if err := saveState(root, st); err != nil {
@@ -98,6 +104,34 @@ func pruneDeleted(root string, prev, next map[string]string) int {
 		p := filepath.Join(root, filepath.FromSlash(strings.TrimPrefix(loc, "/")))
 		if err := os.Remove(p); err == nil {
 			deleted++
+		}
+	}
+	return deleted
+}
+
+// pruneExpired removes packages upstream no longer provides, but only once
+// their local copy is older than the expire window — a grace period so clients
+// that still have the package in their local yum/apt cache keep working while
+// stale files are cleaned up lazily. expireDays <= 0 falls back to 30.
+func pruneExpired(root string, prev, next map[string]string, expireDays int) int {
+	if expireDays <= 0 {
+		expireDays = 30
+	}
+	cutoff := time.Now().AddDate(0, 0, -expireDays)
+	deleted := 0
+	for loc := range prev {
+		if _, ok := next[loc]; ok {
+			continue
+		}
+		p := filepath.Join(root, filepath.FromSlash(strings.TrimPrefix(loc, "/")))
+		st, err := os.Stat(p)
+		if err != nil {
+			continue // already gone
+		}
+		if st.ModTime().Before(cutoff) {
+			if err := os.Remove(p); err == nil {
+				deleted++
+			}
 		}
 	}
 	return deleted

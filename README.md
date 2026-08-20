@@ -13,7 +13,20 @@ RepoForge 是一个**跨平台（Windows / Linux / macOS）**的离线 Linux 软
 - **`make-upgrade`**：对照本机已装包，从上游拉更新及依赖（需在目标 Linux 上运行）。
 - **`list` / `check`**：查看本地离线源、检查 repo.yaml 与上游可达性。
 - **`client` / `use` / `server`**：生成客户端配置、启用本机 file:// 源、局域网 HTTP 分发。
+- **`gpg`**：OpenPGP 密钥管理——`gpg init` 生成签名密钥对，`gpg export` 导出公钥；`signing.enabled` 后自动签名 repodata / Release。
 - 单文件配置、多仓库、多架构自动展开、变量占位符、下载进度输出。
+
+### 元数据签名
+
+- `repoforge gpg init` 生成 Ed25519 密钥对（纯 Go，无需本机 gpg）到 `home/config/signing/`。
+- repo.yaml 设置 `signing.enabled: true` 后，`sync` / `make` 自动签名生成的索引：RPM 写 `repodata/repomd.xml.asc`（客户端 `repo_gpgcheck=1` 校验），DEB 写 `Release` / `InRelease` / `Release.gpg`（apt `Signed-By` 校验）。
+- `repoforge gpg export` 导出公钥，分发给客户端配置 `gpgkey` / `Signed-By`。
+- 未配置密钥时跳过签名并提示，不影响 `trusted=yes` / `gpgcheck=0` 的客户端。
+
+### 元数据兼容
+
+- **zstd 压缩 repodata**：Fedora 39+ / openSUSE / 新版 EPEL 的 `primary.xml.zst`，以及 DEB 的 `Packages.zst` 均可解析。
+- **校验算法**：`upstream.verify` 支持 `auto`（按上游元数据声明的 sha256/sha1/md5 校验，缺省）与强制 `sha256|sha1|md5`；生成的 primary.xml / Packages 按实际算法输出。
 
 ### 下载能力
 
@@ -108,7 +121,7 @@ repositories:
           values: [x86_64, aarch64]   # 多值 → 每个架构一个子目录
     sync:
       enabled: true
-      delete_policy: keep
+      delete_policy: keep   # keep=只增不删；prune=删上游已下线包；prune-expired=只删超过 expire_days 天的下线包
 
   # RPM 按需制作：只下载指定软件 + 自动依赖求解
   - name: rocky-9-install
@@ -161,11 +174,12 @@ repositories:
           vars: [{ name: basearch, value: x86_64 }]
         - url: http://mirrors.aliyun.com/centos-vault/8.5.2111/AppStream/$basearch/os/
           vars: [{ name: basearch, value: x86_64 }]
-      verify: sha256
+      verify: auto   # auto=按上游声明（sha256/sha1/md5）；也可强制 sha256|sha1|md5
     input:
       packages: [vim-enhanced]
     dependency:
       weak_deps: false
+      conflicts: report   # report=版本冲突报错；resolve=尝试找满足全部约束的版本
 ```
 
 ## 依赖求解

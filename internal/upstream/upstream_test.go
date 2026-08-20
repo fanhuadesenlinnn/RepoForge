@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/klauspost/compress/zstd"
 )
 
 func rpmRepomd() string {
@@ -299,5 +301,148 @@ func TestRPMIndexMetadataCache(t *testing.T) {
 	}
 	if primaryHits != 1 || filelistHits != 1 {
 		t.Fatalf("second run hits primary=%d filelists=%d, want unchanged 1/1", primaryHits, filelistHits)
+	}
+}
+
+func rpmPrimaryZstd() []byte {
+	xml := `<?xml version="1.0"?>
+<metadata xmlns="http://linux.duke.edu/metadata/common">
+  <package type="rpm">
+    <name>vim-enhanced</name>
+    <arch>x86_64</arch>
+    <version epoch="0" ver="8.2" rel="1.el9"/>
+    <checksum type="sha256" pkgid="YES">AAAA</checksum>
+    <location href="Packages/v/vim-enhanced-8.2-1.el9.x86_64.rpm"/>
+    <size package="123456"/>
+    <summary>VIM editor</summary>
+    <format>
+      <requires><entry name="libc.so.6()(64bit)"/></requires>
+      <provides><entry name="vim"/></provides>
+    </format>
+  </package>
+</metadata>`
+	var buf bytes.Buffer
+	zw, err := zstd.NewWriter(&buf)
+	if err != nil {
+		panic(err)
+	}
+	if _, err := zw.Write([]byte(xml)); err != nil {
+		panic(err)
+	}
+	if err := zw.Close(); err != nil {
+		panic(err)
+	}
+	return buf.Bytes()
+}
+
+// TestRPMIndexZstd verifies that .zst-compressed repodata (Fedora 39+,
+// openSUSE, new EPEL) is decompressed and parsed.
+func TestRPMIndexZstd(t *testing.T) {
+	repomd := `<?xml version="1.0"?>
+<repomd>
+  <revision>1</revision>
+  <data type="primary">
+    <checksum type="sha256">DEADBEEF</checksum>
+    <location href="repodata/abc-primary.xml.zst"/>
+  </data>
+</repomd>`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "repomd.xml"):
+			w.Write([]byte(repomd))
+		case strings.HasSuffix(r.URL.Path, "primary.xml.zst"):
+			w.Write(rpmPrimaryZstd())
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	ix, err := RPMIndex(context.Background(), srv.URL, "")
+	if err != nil {
+		t.Fatalf("RPMIndex with zstd primary failed: %v", err)
+	}
+	if len(ix.Packages) != 1 || ix.Packages[0].Name != "vim-enhanced" {
+		t.Fatalf("unexpected packages: %+v", ix.Packages)
+	}
+}
+
+// TestDEBIndexZstd verifies .zst-compressed Packages files parse.
+func TestDEBIndexZstd(t *testing.T) {
+	var buf bytes.Buffer
+	zw, err := zstd.NewWriter(&buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := zw.Write([]byte(debPackages())); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "Packages.zst"):
+			w.Write(buf.Bytes())
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	ix, err := DEBIndex(context.Background(), DEBSpec{
+		BaseURL: srv.URL,
+		Suites:  []DEBSuite{{Name: "bookworm", Components: []string{"main"}, Archs: []string{"amd64"}}},
+	})
+	if err != nil {
+		t.Fatalf("DEBIndex with zstd Packages failed: %v", err)
+	}
+	if len(ix.Packages) != 2 {
+		t.Fatalf("packages = %d, want 2", len(ix.Packages))
+	}
+}
+
+// TestDEBIndexPrefersSHA256 checks the checksum algorithm recorded from the
+// Packages file and the SHA1/MD5 fallbacks.
+func TestDEBPackagesChecksumType(t *testing.T) {
+	text := `Package: old
+Version: 1.0
+Architecture: amd64
+Filename: pool/main/o/old.deb
+SHA1: abc123
+Size: 10
+Description: old pkg
+
+Package: nohash
+Version: 1.0
+Architecture: amd64
+Filename: pool/main/n/nohash.deb
+Size: 10
+Description: no hash
+
+Package: new
+Version: 1.0
+Architecture: amd64
+Filename: pool/main/n/new.deb
+SHA256: def456
+Size: 10
+Description: new pkg
+`
+	pkgs, err := parseDEBPackages("http://x", text)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, p := range pkgs {
+		got[p.Name] = p.ChecksumType
+	}
+	if got["old"] != "sha1" {
+		t.Errorf("old pkg checksum type = %q, want sha1", got["old"])
+	}
+	if got["new"] != "sha256" {
+		t.Errorf("new pkg checksum type = %q, want sha256", got["new"])
+	}
+	if got["nohash"] != "" {
+		t.Errorf("nohash pkg checksum type = %q, want empty", got["nohash"])
 	}
 }

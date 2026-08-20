@@ -18,6 +18,14 @@ func With(ctx context.Context, fn Func) context.Context {
 	return context.WithValue(ctx, key{}, fn)
 }
 
+// Warnf reports a warning progress line when a reporter is attached.
+func Warnf(ctx context.Context, format string, args ...any) {
+	fn, _ := ctx.Value(key{}).(Func)
+	if fn != nil {
+		fn("[警告] "+format, args...)
+	}
+}
+
 // Infof reports a progress line when a reporter is attached.
 func Infof(ctx context.Context, format string, args ...any) {
 	fn, _ := ctx.Value(key{}).(Func)

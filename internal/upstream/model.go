@@ -41,18 +41,21 @@ func normalizeOp(op string) string {
 
 // Pkg is a unified package entry shared by RPM and DEB indexes.
 type Pkg struct {
-	Name       string
-	Epoch      string
-	Version    string
-	Release    string
-	Arch       string
-	Location   string // relative path from repo root (or suite root for deb)
-	Checksum   string
-	Size       int64
-	Summary    string
-	Requires   []DependencyEntry // hard dependencies
-	Recommends []DependencyEntry // weak dependencies (recommends)
-	Provides   []string          // names this package provides
+	Name     string
+	Epoch    string
+	Version  string
+	Release  string
+	Arch     string
+	Location string // relative path from repo root (or suite root for deb)
+	Checksum string
+	// ChecksumType is the digest algorithm of Checksum (sha256 | sha1 | md5).
+	// Empty means sha256 (the common default).
+	ChecksumType string
+	Size         int64
+	Summary      string
+	Requires     []DependencyEntry // hard dependencies
+	Recommends   []DependencyEntry // weak dependencies (recommends)
+	Provides     []string          // names this package provides
 	// MultiArch is the DEB Multi-Arch field (same|foreign|allowed). "foreign"
 	// packages can satisfy dependencies from other architectures.
 	MultiArch string

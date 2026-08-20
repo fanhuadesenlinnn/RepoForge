@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/fanhuadesenlinnn/RepoForge/internal/progress"
+	"github.com/klauspost/compress/zstd"
 )
 
 // RPMIndex fetches and parses an RPM repository's metadata into a unified Index
@@ -236,7 +237,11 @@ func openDecompressed(r io.Reader, name string) (io.ReadCloser, error) {
 		}
 		return gz, nil
 	case strings.HasSuffix(name, ".zst"):
-		return nil, fmt.Errorf("暂不支持 zstd 压缩元数据 %s（当前仅支持 gzip）", name)
+		zr, err := zstd.NewReader(r)
+		if err != nil {
+			return nil, fmt.Errorf("解压 %s 失败: %w", name, err)
+		}
+		return zr.IOReadCloser(), nil
 	default:
 		return io.NopCloser(r), nil
 	}
@@ -319,6 +324,9 @@ func primaryToPkg(p primaryPkg) Pkg {
 		Checksum: p.Checksum.Text,
 		Size:     p.Size.Package,
 		Summary:  p.Summary,
+	}
+	if ct := strings.ToLower(p.Checksum.Type); ct != "" {
+		pkg.ChecksumType = ct
 	}
 	for _, r := range p.Requires {
 		pkg.Requires = append(pkg.Requires, DependencyEntry{Name: r.Name, Op: r.Flags, Version: r.Ver})

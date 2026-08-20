@@ -23,7 +23,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          autocrlf: false
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -79,7 +78,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          autocrlf: false
 
       - name: Set up Go
         uses: actions/setup-go@v5

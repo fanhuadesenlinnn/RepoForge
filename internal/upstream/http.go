@@ -9,8 +9,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"os"
-	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -209,66 +207,6 @@ func fetchOnce(ctx context.Context, rawURL string) ([]byte, error) {
 	return io.ReadAll(resp.Body)
 }
 
-// FetchToFile downloads a URL to a file, retrying transient transport errors.
-func FetchToFile(ctx context.Context, rawURL, dst string) (string, error) {
-	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-		return "", err
-	}
-	var lastErr error
-	for attempt := 0; attempt < maxFetchTries; attempt++ {
-		if err := waitAttempt(ctx, attempt); err != nil {
-			return "", err
-		}
-		path, err := fetchToFileOnce(ctx, rawURL, dst)
-		if err == nil {
-			return path, nil
-		}
-		lastErr = err
-		if ctx.Err() != nil {
-			return "", ctx.Err()
-		}
-		if !IsTransient(err) {
-			return "", err
-		}
-		CloseIdle()
-	}
-	return "", fmt.Errorf("请求 %s 多次重试失败: %w", rawURL, lastErr)
-}
-
-func fetchToFileOnce(ctx context.Context, rawURL, dst string) (string, error) {
-	req, err := http.NewRequest(http.MethodGet, rawURL, nil)
-	if err != nil {
-		return "", err
-	}
-	resp, cancel, err := do(ctx, DefaultClient, req)
-	if err != nil {
-		return "", fmt.Errorf("请求 %s 失败: %w", rawURL, err)
-	}
-	defer cancel()
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return "", httpStatusError{url: rawURL, status: resp.StatusCode}
-	}
-	tmp := dst + ".part"
-	f, err := os.Create(tmp)
-	if err != nil {
-		return "", err
-	}
-	if _, err := io.Copy(f, resp.Body); err != nil {
-		f.Close()
-		os.Remove(tmp)
-		return "", err
-	}
-	if err := f.Close(); err != nil {
-		os.Remove(tmp)
-		return "", err
-	}
-	if err := os.Rename(tmp, dst); err != nil {
-		return "", err
-	}
-	return dst, nil
-}
-
 func do(ctx context.Context, client *http.Client, req *http.Request) (*http.Response, context.CancelFunc, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	PrepareRequest(req)
@@ -333,14 +271,4 @@ func IsTransient(err error) bool {
 		strings.Contains(s, "broken pipe") ||
 		strings.Contains(s, "TLS handshake timeout") ||
 		strings.Contains(s, "i/o timeout")
-}
-
-// HasSuffixAny reports whether name ends with any of the suffixes.
-func HasSuffixAny(name string, suffixes ...string) bool {
-	for _, s := range suffixes {
-		if strings.HasSuffix(name, s) {
-			return true
-		}
-	}
-	return false
 }

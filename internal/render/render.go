@@ -4,7 +4,6 @@ package render
 import (
 	"bytes"
 	"fmt"
-	"os"
 	"text/template"
 )
 
@@ -19,13 +18,4 @@ func Text(source string, data any) ([]byte, error) {
 		return nil, fmt.Errorf("渲染模板失败: %w", err)
 	}
 	return output.Bytes(), nil
-}
-
-// File renders a Go text template from disk.
-func File(path string, data any) ([]byte, error) {
-	content, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("读取模板 %s 失败: %w", path, err)
-	}
-	return Text(string(content), data)
 }

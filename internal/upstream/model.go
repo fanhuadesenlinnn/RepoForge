@@ -118,30 +118,3 @@ type Index struct {
 func (ix *Index) ResolveLocation(loc string) string {
 	return strings.TrimRight(ix.BaseURL, "/") + "/" + strings.TrimPrefix(loc, "/")
 }
-
-// ByName returns all packages matching a name (across versions/arches).
-func (ix *Index) ByName(name string) []Pkg {
-	var out []Pkg
-	for _, p := range ix.Packages {
-		if p.Name == name {
-			out = append(out, p)
-		}
-	}
-	return out
-}
-
-// Provider returns the package(s) that satisfy a provides name.
-func (ix *Index) Provider(provName string) []Pkg {
-	var out []Pkg
-	for _, p := range ix.Packages {
-		if p.Name == provName {
-			out = append(out, p)
-		}
-		for _, prov := range p.Provides {
-			if prov == provName {
-				out = append(out, p)
-			}
-		}
-	}
-	return out
-}

@@ -1,0 +1,6 @@
+# 源码始终以 LF 检出，避免 Windows 上 gofmt 因 CRLF 误报未格式化
+*.go   text eol=lf
+*.sh   text eol=lf
+*.yaml text eol=lf
+*.yml  text eol=lf
+*.md   text eol=lf

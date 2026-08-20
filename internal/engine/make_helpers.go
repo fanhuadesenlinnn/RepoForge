@@ -271,11 +271,17 @@ func archOKFor(p upstream.Pkg, archs []string, backend string) bool {
 
 // archList returns the build architecture list (used by dependency solving).
 // Priority: upstream.arch > target.arch > the expanded variant's $basearch
-// > backend default. The $basearch step matters for multi-arch configs that
-// expand the same repo into x86_64 and aarch64 variants: without it, the
-// aarch64 variant would be solved against x86_64-only packages and resolve
-// nothing.
-func archList(r *repo.Repository, vars map[string]string) []string {
+// > URL inference > no filtering. The $basearch step matters for multi-arch
+// configs that expand the same repo into x86_64 and aarch64 variants:
+// without it, the aarch64 variant would be solved against x86_64-only
+// packages and resolve nothing.
+//
+// When no architecture is declared anywhere, the upstream URL is inspected
+// (e.g. .../base/aarch64/ is a Kylin aarch64 repo). Only when the URL also
+// carries no arch marker does archList return nil — meaning "do not filter
+// by architecture" — so an undeclared aarch64/arm64 source never silently
+// resolves to an empty repository.
+func archList(r *repo.Repository, vars map[string]string, urls ...string) []string {
 	if len(r.Upstream.Arch) > 0 {
 		return append([]string{}, r.Upstream.Arch...)
 	}
@@ -291,8 +297,30 @@ func archList(r *repo.Repository, vars map[string]string) []string {
 		}
 		return []string{base, "all"}
 	}
-	if r.Backend == "rpm" {
-		return []string{"x86_64", "noarch"}
+	if a := archFromURLs(urls); a != "" {
+		if r.Backend == "rpm" {
+			return []string{a, "noarch"}
+		}
+		return []string{a, "all"}
 	}
-	return []string{"amd64", "all"}
+	// No architecture information anywhere: do not filter (nil = all pass).
+	// Filtering with a hardcoded default here is what silently produced empty
+	// aarch64 repositories before.
+	return nil
+}
+
+// archFromURLs returns the architecture a URL mentions (aarch64/arm64 or
+// x86_64/amd64), or "" when none is present. Used to infer the arch of an
+// undeclared repository such as Kylin's .../base/aarch64/.
+func archFromURLs(urls []string) string {
+	for _, u := range urls {
+		low := strings.ToLower(u)
+		switch {
+		case strings.Contains(low, "aarch64") || strings.Contains(low, "arm64"):
+			return "aarch64"
+		case strings.Contains(low, "x86_64") || strings.Contains(low, "amd64"):
+			return "x86_64"
+		}
+	}
+	return ""
 }

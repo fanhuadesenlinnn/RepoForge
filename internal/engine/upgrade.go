@@ -32,7 +32,7 @@ func MakeUpgrade(ctx context.Context, cfg *repo.Config, ev *repo.Expanded, insta
 	}
 	opt := SolveOptions{
 		Backend:   ev.Repository.Backend,
-		Archs:     archList(ev.Repository, ev.Vars),
+		Archs:     archList(ev.Repository, ev.Vars, expandedURLs(ev)...),
 		Conflicts: ev.Repository.Dependency.Conflicts,
 	}
 	names, notices := upgradesFromInstalled(ix, installed, opt)

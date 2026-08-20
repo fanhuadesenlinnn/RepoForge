@@ -1,5 +1,9 @@
 # Changelog
 
+## v1.4.1
+
+- 修复：RPM 源未声明架构时静默按 x86_64 过滤，导致 aarch64/arm64 源（如麒麟 `.../base/aarch64/`）解析出空仓库。现在按优先级：`upstream.arch` → `target.arch` → `$basearch` 变量 → **从 URL 推断架构**（`aarch64`/`arm64`/`x86_64`/`amd64`）；URL 也无法推断时不按架构过滤，绝不静默产出空仓。
+
 ## v1.4.0
 
 - 新增：OpenPGP 签名（纯 Go，无 gpg 依赖）——`repoforge gpg init` 生成 Ed25519 密钥对，`gpg export` 导出公钥；`signing.enabled: true` 后 sync/make 自动签名：RPM 生成 `repomd.xml.asc`（yum repo_gpgcheck），DEB 生成 `Release` / `InRelease` / `Release.gpg`（apt Signed-By）。

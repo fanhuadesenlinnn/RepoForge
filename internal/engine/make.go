@@ -59,7 +59,7 @@ func Make(ctx context.Context, cfg *repo.Config, ev *repo.Expanded) (*MakeResult
 	baseRequests = append(baseRequests, r.Input.Packages...)
 
 	if len(r.Input.PackageDirs) > 0 {
-		pkgs, allNames, n, skipped, _, err := collectLocalPkgs(ctx, r, root, archList(r, ev.Vars), cfg.Paths.HomeDir)
+		pkgs, allNames, n, skipped, _, err := collectLocalPkgs(ctx, r, root, archList(r, ev.Vars, expandedURLs(ev)...), cfg.Paths.HomeDir)
 		if err != nil {
 			return nil, err
 		}
@@ -76,7 +76,7 @@ func Make(ctx context.Context, cfg *repo.Config, ev *repo.Expanded) (*MakeResult
 
 	opt := SolveOptions{
 		Backend:      r.Backend,
-		Archs:        archList(r, ev.Vars),
+		Archs:        archList(r, ev.Vars, expandedURLs(ev)...),
 		WeakDeps:     r.Dependency.WeakDeps,
 		Conflicts:    r.Dependency.Conflicts,
 		LocalPkgs:    localPkgs,

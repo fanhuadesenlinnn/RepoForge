@@ -119,9 +119,8 @@ func TestArchListFromVariantBasearch(t *testing.T) {
 		vars map[string]string
 		want []string
 	}{
-		{nil, []string{"x86_64", "noarch"}},
+		{nil, nil}, // no arch info anywhere -> no filtering (not x86_64 default!)
 		{map[string]string{"basearch": "x86_64"}, []string{"x86_64", "noarch"}},
-		{map[string]string{"basearch": "aarch64"}, []string{"aarch64", "noarch"}},
 		{map[string]string{"basearch": "aarch64"}, []string{"aarch64", "noarch"}},
 	}
 	for _, c := range cases {
@@ -143,6 +142,41 @@ func TestArchListFromVariantBasearch(t *testing.T) {
 	ru := &repo.Repository{Backend: "rpm", Upstream: repo.Upstream{Arch: []string{"ppc64le"}}}
 	if got := archList(ru, map[string]string{"basearch": "aarch64"}); got[0] != "ppc64le" {
 		t.Fatalf("upstream.arch should win, got %v", got)
+	}
+}
+
+// TestArchListInfersFromURL verifies the fix for aarch64 sources silently
+// resolving to empty: an undeclared Kylin .../base/aarch64/ URL must be
+// inferred as aarch64 (not filtered with the old x86_64 default), and a URL
+// with no arch marker must produce no filtering at all.
+func TestArchListInfersFromURL(t *testing.T) {
+	rpm := &repo.Repository{Backend: "rpm"}
+	aarch64 := archList(rpm, nil, "https://update.cs2c.com.cn/NS/V10/V10SP3-2403/os/adv/lic/base/aarch64/")
+	if len(aarch64) != 2 || aarch64[0] != "aarch64" || aarch64[1] != "noarch" {
+		t.Fatalf("aarch64 URL should infer [aarch64 noarch], got %v", aarch64)
+	}
+	x86 := archList(rpm, nil, "https://mirrors.aliyun.com/centos-vault/8.5.2111/BaseOS/x86_64/os/")
+	if len(x86) != 2 || x86[0] != "x86_64" {
+		t.Fatalf("x86_64 URL should infer x86_64, got %v", x86)
+	}
+	unknown := archList(rpm, nil, "https://mirror.example.com/pub/linux/repo/os/")
+	if unknown != nil {
+		t.Fatalf("URL without arch marker should yield nil (no filter), got %v", unknown)
+	}
+	// basearch variable still beats URL inference.
+	declared := archList(rpm, map[string]string{"basearch": "aarch64"}, "https://x/BaseOS/x86_64/os/")
+	if declared[0] != "aarch64" {
+		t.Fatalf("basearch should beat URL inference, got %v", declared)
+	}
+	// DEB backend gets "all" appended.
+	deb := &repo.Repository{Backend: "deb"}
+	d := archList(deb, nil, "https://deb.debian.org/debian")
+	if d != nil {
+		t.Fatalf("DEB URL without arch marker should yield nil, got %v", d)
+	}
+	d2 := archList(deb, nil, "https://mirror.example.com/ubuntu-ports/arm64")
+	if len(d2) != 2 || d2[0] != "aarch64" || d2[1] != "all" {
+		t.Fatalf("arm64 URL for deb should infer [aarch64 all], got %v", d2)
 	}
 }
 

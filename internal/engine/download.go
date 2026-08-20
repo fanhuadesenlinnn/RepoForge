@@ -389,7 +389,12 @@ func (d *downloader) runAll(ctx context.Context, items []downloadItem) (download
 			if err != nil {
 				status = "失败"
 			}
-			progress.Infof(ctx, "[下载] %d/%d  %s  %s", n, total, status, filepath.Base(it.Dst))
+			progress.ReportDownload(ctx, progress.Download{
+				Done:   n,
+				Total:  total,
+				Status: status,
+				Name:   filepath.Base(it.Dst),
+			})
 		}(it)
 	}
 	wg.Wait()

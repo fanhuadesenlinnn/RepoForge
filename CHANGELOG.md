@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## v1.1.1
+
+- 修复：Windows 平台路径处理——`input.package_dirs` 不再把 `C:\...` 按 `:` 拆错盘符；`${home}` 前缀路径统一分隔符。
+- 修复：CI 在 Windows 上因 CRLF 换行导致 gofmt 检查误报（新增 `.gitattributes` 强制 LF）。
+
 ## v1.1.0
 
 - 新增：GitHub 流水线支持 Windows / macOS——CI 在三个平台跑测试与冒烟测试，打包 Linux/Darwin/Windows × amd64/arm64 共 6 种发布产物（Windows 为 zip，含 repoforge.exe）。

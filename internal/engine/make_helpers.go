@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -8,42 +9,125 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/fanhuadesenlinnn/RepoForge/internal/progress"
 	"github.com/fanhuadesenlinnn/RepoForge/internal/repo"
 	"github.com/fanhuadesenlinnn/RepoForge/internal/upstream"
 )
 
 // collectAndCopyInput scans input.package_dirs for existing rpm/deb files,
-// copies them into root, and returns the package names to use as starting
-// points (parsed from filenames) plus how many files were copied.
-func collectAndCopyInput(r *repo.Repository, root string) ([]string, int, error) {
+// copies the ones whose architecture matches the variant's arch set into root,
+// and returns the package names to use as starting points (parsed from
+// filenames), how many files were copied, how many were skipped because their
+// architecture does not match this variant, and the skipped arch breakdown.
+// A single directory may mix architectures (e.g. x86_64 + noarch); different
+// directories may target different architectures. noarch/all always match.
+func collectAndCopyInput(ctx context.Context, r *repo.Repository, root string, archs []string, home string) (names []string, copied, skipped int, skippedByArch map[string]int, err error) {
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		return nil, 0, 0, nil, err
+	}
 	var files []string
 	for _, dir := range r.Input.PackageDirs {
-		f, err := scanPackageFiles(dir, r.Backend, r.Input.Recursive)
+		resolved := resolveInputDir(dir, home)
+		f, err := scanPackageFiles(resolved, r.Backend, r.Input.Recursive)
 		if err != nil {
-			return nil, 0, err
+			return nil, 0, 0, nil, err
 		}
+		progress.Infof(ctx, "[输入] 目录 %s：找到 %d 个 %s 文件", dir, len(f), r.Backend)
 		files = append(files, f...)
 	}
 	sort.Strings(files)
 
-	names := map[string]bool{}
-	copied := 0
+	namesMap := map[string]bool{}
+	skippedByArch = map[string]int{}
 	for _, src := range files {
+		fileArch := pkgArchFromFile(src, r.Backend)
+		if !archMatch(fileArch, archs, r.Backend) {
+			skipped++
+			skippedByArch[fileArch]++
+			continue
+		}
 		name := pkgNameFromFile(src, r.Backend)
 		if name != "" {
-			names[name] = true
+			namesMap[name] = true
 		}
 		dst := filepath.Join(root, filepath.Base(src))
 		if err := copyFileIfNeeded(src, dst); err != nil {
-			return nil, 0, err
+			return nil, 0, 0, nil, err
 		}
 		copied++
 	}
-	out := make([]string, 0, len(names))
-	for n := range names {
+	out := make([]string, 0, len(namesMap))
+	for n := range namesMap {
 		out = append(out, n)
 	}
-	return out, copied, nil
+	if copied > 0 {
+		progress.Infof(ctx, "[输入] 复制 %d 个本地包（架构匹配）", copied)
+	}
+	if skipped > 0 {
+		var parts []string
+		for a, n := range skippedByArch {
+			parts = append(parts, fmt.Sprintf("%s: %d", a, n))
+		}
+		sort.Strings(parts)
+		progress.Infof(ctx, "[输入] 跳过 %d 个架构不匹配的包（%s）", skipped, strings.Join(parts, ", "))
+	}
+	return out, copied, skipped, skippedByArch, nil
+}
+
+// resolveInputDir resolves a package_dirs entry. Relative paths are first
+// tried against the current working directory, then relative to the
+// RepoForge home, so a bare name like "tem-rpm-x86" works from anywhere.
+func resolveInputDir(dir, home string) string {
+	if filepath.IsAbs(dir) {
+		return dir
+	}
+	if _, err := os.Stat(dir); err == nil {
+		return dir
+	}
+	candidate := filepath.Join(home, dir)
+	if _, err := os.Stat(candidate); err == nil {
+		return candidate
+	}
+	return dir // let the caller surface the original path in the error
+}
+
+// pkgArchFromFile extracts the package architecture from a file name.
+// RPM: name-version-release.arch.rpm (arch is the last dot segment)
+// DEB: name_version_arch.deb        (arch is the last underscore segment)
+func pkgArchFromFile(file, backend string) string {
+	base := filepath.Base(file)
+	if backend == "rpm" {
+		s := strings.TrimSuffix(base, ".rpm")
+		if i := strings.LastIndex(s, "."); i >= 0 {
+			return s[i+1:]
+		}
+		return s
+	}
+	s := strings.TrimSuffix(base, ".deb")
+	if i := strings.LastIndex(s, "_"); i >= 0 {
+		return s[i+1:]
+	}
+	return s
+}
+
+// archMatch reports whether a local package file's architecture belongs to the
+// variant's architecture set. noarch (rpm) and all (deb) always match.
+func archMatch(fileArch string, archs []string, backend string) bool {
+	if len(archs) == 0 {
+		return true
+	}
+	for _, a := range archs {
+		if fileArch == a || fileArch == "*" {
+			return true
+		}
+	}
+	if backend == "rpm" && fileArch == "noarch" {
+		return true
+	}
+	if backend == "deb" && fileArch == "all" {
+		return true
+	}
+	return false
 }
 
 // splitPathList splits a possibly colon-separated path list (Unix PATH style),

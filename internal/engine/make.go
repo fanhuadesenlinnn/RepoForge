@@ -19,9 +19,13 @@ type MakeResult struct {
 	Selected   int
 	Downloaded int
 	Copied     int
-	Problems   []string // hard problems — should surface as errors
-	Notices    []string // tolerated soft/virtual dep notes — informational only
-	Repodata   string
+	// SkippedLocal counts local package_dirs files not copied because their
+	// architecture does not match this variant (e.g. x86_64 rpm in a directory
+	// scanned while building the aarch64 variant).
+	SkippedLocal int
+	Problems     []string // hard problems — should surface as errors
+	Notices      []string // tolerated soft/virtual dep notes — informational only
+	Repodata     string
 }
 
 // Make builds an offline repo from the repository's make/input starting points:
@@ -47,16 +51,18 @@ func Make(ctx context.Context, cfg *repo.Config, ev *repo.Expanded) (*MakeResult
 	// as pre-provided (already available) starting points, so only their missing
 	// dependencies get resolved/fetched.
 	copied := 0
+	skippedLocal := 0
 	var preProvided []string
 	var baseRequests []string // union of input.packages + upgrade names
 	baseRequests = append(baseRequests, r.Input.Packages...)
 
 	if len(r.Input.PackageDirs) > 0 {
-		names, n, err := collectAndCopyInput(r, root)
+		names, n, skipped, _, err := collectAndCopyInput(ctx, r, root, archList(r, ev.Vars), cfg.Paths.HomeDir)
 		if err != nil {
 			return nil, err
 		}
 		copied += n
+		skippedLocal += skipped
 		preProvided = append(preProvided, names...)
 	}
 
@@ -120,14 +126,15 @@ func Make(ctx context.Context, cfg *repo.Config, ev *repo.Expanded) (*MakeResult
 	}
 
 	return &MakeResult{
-		Repository: r.Name,
-		URL:        ev.URL,
-		Output:     root,
-		Selected:   len(subset),
-		Downloaded: downloaded,
-		Copied:     copied,
-		Problems:   dedupe(problems),
-		Notices:    dedupe(notices),
-		Repodata:   repodata,
+		Repository:   r.Name,
+		URL:          ev.URL,
+		Output:       root,
+		Selected:     len(subset),
+		Downloaded:   downloaded,
+		Copied:       copied,
+		SkippedLocal: skippedLocal,
+		Problems:     dedupe(problems),
+		Notices:      dedupe(notices),
+		Repodata:     repodata,
 	}, nil
 }

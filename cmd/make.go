@@ -69,8 +69,13 @@ func newMakeCommand() *cobra.Command {
 						anyErr = true
 						continue
 					}
-					fmt.Fprintf(command.OutOrStdout(), "完成: 已选 %d 包，下载 %d，本地复制 %d，repodata: %s\n",
-						result.Selected, result.Downloaded, result.Copied, result.Repodata)
+					if result.SkippedLocal > 0 {
+						fmt.Fprintf(command.OutOrStdout(), "完成: 已选 %d 包，下载 %d，本地复制 %d，跳过(架构不匹配) %d，repodata: %s\n",
+							result.Selected, result.Downloaded, result.Copied, result.SkippedLocal, result.Repodata)
+					} else {
+						fmt.Fprintf(command.OutOrStdout(), "完成: 已选 %d 包，下载 %d，本地复制 %d，repodata: %s\n",
+							result.Selected, result.Downloaded, result.Copied, result.Repodata)
+					}
 					for _, n := range result.Notices {
 						fmt.Fprintf(command.OutOrStdout(), "  [INFO] %s\n", n)
 					}

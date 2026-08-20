@@ -140,3 +140,84 @@ func TestArchListFromVariantBasearch(t *testing.T) {
 		t.Fatalf("upstream.arch should win, got %v", got)
 	}
 }
+
+// collectAndCopyInput must only copy packages whose architecture matches the
+// variant's arch set (noarch always matches), and report skipped ones, so a
+// mixed-arch package_dirs directory works per variant.
+func TestCollectAndCopyInputArchFilter(t *testing.T) {
+	home := t.TempDir()
+	inDir := filepath.Join(home, "mixed")
+	os.MkdirAll(inDir, 0o755)
+	for _, f := range []string{
+		"vim-enhanced-9.0-1.ky10.x86_64.rpm",
+		"glibc-2.28-1.ky10.x86_64.rpm",
+		"tzdata-2022a-1.ky10.noarch.rpm",
+		"bash-5.0-1.ky10.aarch64.rpm",
+	} {
+		os.WriteFile(filepath.Join(inDir, f), []byte("x"), 0o644)
+	}
+	r := &repo.Repository{
+		Backend: "rpm",
+		Input:   repo.Input{PackageDirs: []string{inDir}},
+	}
+	root := filepath.Join(home, "out")
+	ctx := context.Background()
+
+	// x86_64 variant: copies x86_64 + noarch, skips aarch64.
+	names, copied, skipped, byArch, err := collectAndCopyInput(ctx, r, root, []string{"x86_64", "noarch"}, home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if copied != 3 {
+		t.Fatalf("copied = %d, want 3", copied)
+	}
+	if skipped != 1 || byArch["aarch64"] != 1 {
+		t.Fatalf("skipped = %d (%v), want 1 aarch64", skipped, byArch)
+	}
+	got := map[string]bool{}
+	for _, n := range names {
+		got[n] = true
+	}
+	for _, want := range []string{"vim-enhanced", "glibc", "tzdata"} {
+		if !got[want] {
+			t.Errorf("missing pre-provided name %q in %v", want, names)
+		}
+	}
+	for _, f := range []string{"vim-enhanced-9.0-1.ky10.x86_64.rpm", "glibc-2.28-1.ky10.x86_64.rpm", "tzdata-2022a-1.ky10.noarch.rpm"} {
+		if _, err := os.Stat(filepath.Join(root, f)); err != nil {
+			t.Errorf("expected copied file %s: %v", f, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(root, "bash-5.0-1.ky10.aarch64.rpm")); err == nil {
+		t.Error("aarch64 rpm must not be copied into x86_64 variant")
+	}
+
+	// aarch64 variant: copies aarch64 + noarch, skips x86_64.
+	root2 := filepath.Join(home, "out2")
+	_, copied2, skipped2, byArch2, err := collectAndCopyInput(ctx, r, root2, []string{"aarch64", "noarch"}, home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if copied2 != 2 {
+		t.Fatalf("aarch64 copied = %d, want 2", copied2)
+	}
+	if skipped2 != 2 || byArch2["x86_64"] != 2 {
+		t.Fatalf("aarch64 skipped = %d (%v), want 2 x86_64", skipped2, byArch2)
+	}
+}
+
+// pkgArchFromFile parses RPM and DEB architectures from file names.
+func TestPkgArchFromFile(t *testing.T) {
+	cases := []struct{ file, backend, want string }{
+		{"vim-common-9.0-45.p05.ky10.aarch64.rpm", "rpm", "aarch64"},
+		{"tzdata-2022a-15.p01.ky10.noarch.rpm", "rpm", "noarch"},
+		{"ImageMagick-devel-6.9.13.28-2.ky10.x86_64.rpm", "rpm", "x86_64"},
+		{"vim_9.0_amd64.deb", "deb", "amd64"},
+		{"libc6_2.36-9_all.deb", "deb", "all"},
+	}
+	for _, c := range cases {
+		if got := pkgArchFromFile(c.file, c.backend); got != c.want {
+			t.Errorf("pkgArchFromFile(%q, %s) = %q, want %q", c.file, c.backend, got, c.want)
+		}
+	}
+}

@@ -59,7 +59,7 @@ repositories:
         - url: http://mirrors.aliyun.com/centos-vault/8.5.2111/BaseOS/$basearch/os/
           vars:
             - name: basearch
-              value: x86_64
+              value: x86_64   # value 单值或列表均可；多值也可写 values: [x86_64, aarch64]
         - url: http://mirrors.aliyun.com/centos-vault/8.5.2111/AppStream/$basearch/os/
           vars:
             - name: basearch

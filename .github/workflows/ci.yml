@@ -11,7 +11,14 @@ permissions:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+          - macos-latest
+    runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -23,6 +30,7 @@ jobs:
           cache: false
 
       - name: Check formatting
+        shell: bash
         run: test -z "$(gofmt -l $(git ls-files '*.go'))"
 
       - name: Test with race detector
@@ -34,22 +42,37 @@ jobs:
       - name: Build
         run: go build ./...
 
-      - name: Linux smoke test
+      - name: Smoke test
+        shell: bash
         run: |
+          bin_name="repoforge"
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            bin_name="repoforge.exe"
+          fi
           home_dir="$(mktemp -d)"
           mkdir -p "$home_dir/bin"
-          go build -o "$home_dir/bin/repoforge" .
-          "$home_dir/bin/repoforge" init
-          "$home_dir/bin/repoforge" check
-          "$home_dir/bin/repoforge" --version
+          go build -o "$home_dir/bin/$bin_name" .
+          "$home_dir/bin/$bin_name" init
+          "$home_dir/bin/$bin_name" check
+          "$home_dir/bin/$bin_name" --version
 
   package:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        arch:
-          - amd64
-          - arm64
+        include:
+          - os: linux
+            arch: amd64
+          - os: linux
+            arch: arm64
+          - os: darwin
+            arch: amd64
+          - os: darwin
+            arch: arm64
+          - os: windows
+            arch: amd64
+          - os: windows
+            arch: arm64
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -61,11 +84,11 @@ jobs:
           cache: false
 
       - name: Build release archive
-        run: scripts/package-release.sh ci-${{ github.sha }} ${{ matrix.arch }}
+        run: scripts/package-release.sh ci-${{ github.sha }} ${{ matrix.os }} ${{ matrix.arch }}
 
       - name: Upload release archive
         uses: actions/upload-artifact@v4
         with:
-          name: repoforge-linux-${{ matrix.arch }}
-          path: dist/*.tar.gz
+          name: repoforge-${{ matrix.os }}-${{ matrix.arch }}
+          path: dist/*
           if-no-files-found: error

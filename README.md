@@ -26,11 +26,27 @@ RepoForge 是一个**跨平台（Windows / Linux / macOS）**的离线 Linux 软
 
 ## 安装
 
-从 [Releases](https://github.com/fanhuadesenlinnn/RepoForge/releases) 下载对应架构的压缩包：
+从 [Releases](https://github.com/fanhuadesenlinnn/RepoForge/releases) 下载对应系统和架构的压缩包：
+
+| 系统 | 架构 | 格式 | 示例文件 |
+| --- | --- | --- | --- |
+| Linux | amd64 / arm64 | tar.gz | `repoforge_v1.0.0_linux_amd64.tar.gz` |
+| macOS | amd64 / arm64 (Apple Silicon) | tar.gz | `repoforge_v1.0.0_darwin_arm64.tar.gz` |
+| Windows | amd64 / arm64 | zip | `repoforge_v1.0.0_windows_amd64.zip` |
+
+**Linux / macOS**：
 
 ```bash
 sudo tar -C /opt -xzf repoforge_v1.0.0_linux_amd64.tar.gz
 export PATH="/opt/repoforge/bin:$PATH"
+repoforge init
+```
+
+**Windows**（解压 zip 后，把 `bin` 目录加入 PATH）：
+
+```powershell
+Expand-Archive repoforge_v1.0.0_windows_amd64.zip -DestinationPath C:\repoforge
+$env:Path += ";C:\repoforge\repoforge\bin"
 repoforge init
 ```
 
@@ -120,8 +136,8 @@ repositories:
 
 ### 关键配置点
 
-- **变量**：`value` 单值（直接替换 URL 占位符 `$名字`）；`values` 多值（笛卡尔展开成多组）。
-  顶层 `vars` 共享，`upstream.vars` 局部可覆盖。
+- **变量**：`value` 单值或列表（`value: x86_64` / `value: [x86_64, aarch64]`，直接替换 URL 占位符 `$名字`）；`values` 多值（笛卡尔展开成多组）。
+  顶层 `vars` 共享（每项同样支持标量或列表），`upstream.vars` 局部可覆盖。
 - **目录**：全局 `paths.repo_dir` 定根；仓库级 `repo_dir` 可选覆盖（为该仓库内容根）；
   多架构/套件自动展开子目录，无需手写。
 - **制作方式**：配 `sync` → `repoforge sync` 整仓镜像；配 `input.packages` → `repoforge make` 按需。

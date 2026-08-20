@@ -225,3 +225,116 @@ func TestSegmentModeParsing(t *testing.T) {
 		}
 	}
 }
+
+func loadRepoConfig(t *testing.T, content string) *Config {
+	t.Helper()
+	home := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(home, "config"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, "config", "repo.yaml"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cfg
+}
+
+// value: [x86_64, aarch64] — a list given to the single-value field — must
+// expand into multiple variants instead of failing to unmarshal.
+func TestVarValueAcceptsList(t *testing.T) {
+	content := `schema_version: 2
+paths:
+  repo_dir: ${home}/repos
+repositories:
+  - name: multiarch
+    backend: rpm
+    upstream:
+      url: http://x/$basearch/os/
+      vars:
+        - name: basearch
+          value: [x86_64, aarch64]
+    sync:
+      enabled: true
+`
+	cfg := loadRepoConfig(t, content)
+	variants, err := Expand(cfg, &cfg.Repositories[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(variants) != 2 {
+		t.Fatalf("expected 2 variants, got %d", len(variants))
+	}
+	want := map[string]bool{
+		"http://x/x86_64/os/":  true,
+		"http://x/aarch64/os/": true,
+	}
+	for _, v := range variants {
+		if !want[v.URL] {
+			t.Errorf("unexpected variant URL %q", v.URL)
+		}
+	}
+}
+
+// Global vars accept both a scalar and a list per key.
+func TestVarMapScalarAndList(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		global  string
+		wantURL string
+	}{
+		{"scalar", "  basearch: x86_64\n", "http://x/x86_64/os/"},
+		{"list", "  basearch: [x86_64, aarch64]\n", "http://x/aarch64/os/"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			content := "schema_version: 2\npaths:\n  repo_dir: ${home}/repos\nvars:\n" + tc.global + "repositories:\n  - name: multiarch\n    backend: rpm\n    upstream:\n      url: http://x/$basearch/os/\n    sync:\n      enabled: true\n"
+			cfg := loadRepoConfig(t, content)
+			variants, err := Expand(cfg, &cfg.Repositories[0])
+			if err != nil {
+				t.Fatal(err)
+			}
+			found := false
+			for _, v := range variants {
+				if v.URL == tc.wantURL {
+					found = true
+				}
+			}
+			if !found {
+				t.Fatalf("variants %+v missing URL %q", variants, tc.wantURL)
+			}
+		})
+	}
+}
+
+// Local vars override global vars, and a scalar override stays a single variant.
+func TestVarLocalOverrideScalar(t *testing.T) {
+	content := `schema_version: 2
+paths:
+  repo_dir: ${home}/repos
+vars:
+  basearch: [x86_64, aarch64]
+repositories:
+  - name: multiarch
+    backend: rpm
+    upstream:
+      url: http://x/$basearch/os/
+      vars:
+        - name: basearch
+          value: x86_64
+    sync:
+      enabled: true
+`
+	cfg := loadRepoConfig(t, content)
+	variants, err := Expand(cfg, &cfg.Repositories[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(variants) != 1 {
+		t.Fatalf("expected 1 variant after scalar override, got %d", len(variants))
+	}
+	if variants[0].URL != "http://x/x86_64/os/" {
+		t.Fatalf("URL = %q", variants[0].URL)
+	}
+}

@@ -8,6 +8,7 @@ package repo
 
 import (
 	"errors"
+	"fmt"
 
 	"gopkg.in/yaml.v3"
 )
@@ -105,10 +106,86 @@ type Source struct {
 }
 
 // Var is one named variable with either a single value or multiple values.
+// Both forms are accepted for ergonomics:
+//
+//	value: x86_64                → single value
+//	value: [x86_64, aarch64]     → multiple values (list)
+//	values: [x86_64, aarch64]    → multiple values (canonical form)
 type Var struct {
 	Name   string   `yaml:"name"`
 	Value  string   `yaml:"value"`
 	Values []string `yaml:"values"`
+}
+
+// UnmarshalYAML accepts value as a scalar or a list. Writing
+// value: [x86_64, aarch64] is stored into Values, so it expands into
+// multiple variants instead of failing with a cryptic unmarshal error.
+func (v *Var) UnmarshalYAML(node *yaml.Node) error {
+	var raw struct {
+		Name   string    `yaml:"name"`
+		Value  yaml.Node `yaml:"value"`
+		Values []string  `yaml:"values"`
+	}
+	if err := node.Decode(&raw); err != nil {
+		return err
+	}
+	v.Name = raw.Name
+	v.Values = raw.Values
+	if raw.Value.Kind != 0 {
+		switch raw.Value.Kind {
+		case yaml.ScalarNode:
+			var s string
+			if err := raw.Value.Decode(&s); err != nil {
+				return err
+			}
+			v.Value = s
+		case yaml.SequenceNode:
+			var list []string
+			if err := raw.Value.Decode(&list); err != nil {
+				return err
+			}
+			v.Values = list
+		default:
+			return fmt.Errorf("变量 %s 的 value 需要是字符串或字符串列表", raw.Name)
+		}
+	}
+	return nil
+}
+
+// UnmarshalYAML accepts each global variable as a scalar or a list:
+//
+//	vars: { basearch: x86_64 }            → [x86_64]
+//	vars: { basearch: [x86_64, aarch64] } → [x86_64, aarch64]
+func (m *VarMap) UnmarshalYAML(node *yaml.Node) error {
+	*m = VarMap{}
+	if node.Kind != yaml.MappingNode {
+		return errors.New("vars 需要是映射（如 vars: { basearch: [x86_64, aarch64] }）")
+	}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		keyNode := node.Content[i]
+		valNode := node.Content[i+1]
+		var key string
+		if err := keyNode.Decode(&key); err != nil {
+			return err
+		}
+		switch valNode.Kind {
+		case yaml.ScalarNode:
+			var s string
+			if err := valNode.Decode(&s); err != nil {
+				return err
+			}
+			(*m)[key] = []string{s}
+		case yaml.SequenceNode:
+			var list []string
+			if err := valNode.Decode(&list); err != nil {
+				return err
+			}
+			(*m)[key] = list
+		default:
+			return fmt.Errorf("vars.%s 需要是字符串或字符串列表", key)
+		}
+	}
+	return nil
 }
 
 // Suite is a DEB suite/component pair.

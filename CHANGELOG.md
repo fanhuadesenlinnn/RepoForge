@@ -2,7 +2,12 @@
 
 ## Unreleased
 
-## v1.0.0
+## v1.1.0
+
+- 新增：GitHub 流水线支持 Windows / macOS——CI 在三个平台跑测试与冒烟测试，打包 Linux/Darwin/Windows × amd64/arm64 共 6 种发布产物（Windows 为 zip，含 repoforge.exe）。
+- 新增：变量语法放宽——`value: [x86_64, aarch64]` 列表写法与全局 `vars` 标量写法均可用，与 `values:` 等价；多架构配置不再需要 `values:` 字段。
+- 文档：README 安装章节补充 macOS / Windows 安装示例。
+
 
 首个稳定大版本：只保留单文件 `repo.yaml` + 纯 Go 引擎，不再依赖本机 dnf/apt/createrepo。
 

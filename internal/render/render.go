@@ -1,3 +1,4 @@
+// Package render renders Go text templates from strings or files.
 package render
 
 import (
@@ -7,19 +8,24 @@ import (
 	"text/template"
 )
 
+// Text renders a Go text template from a string.
+func Text(source string, data any) ([]byte, error) {
+	parsed, err := template.New("repoforge").Option("missingkey=error").Parse(source)
+	if err != nil {
+		return nil, fmt.Errorf("解析模板失败: %w", err)
+	}
+	var output bytes.Buffer
+	if err := parsed.Execute(&output, data); err != nil {
+		return nil, fmt.Errorf("渲染模板失败: %w", err)
+	}
+	return output.Bytes(), nil
+}
+
 // File renders a Go text template from disk.
 func File(path string, data any) ([]byte, error) {
 	content, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("读取模板 %s 失败: %w", path, err)
 	}
-	parsed, err := template.New("repoforge").Option("missingkey=error").Parse(string(content))
-	if err != nil {
-		return nil, fmt.Errorf("解析模板 %s 失败: %w", path, err)
-	}
-	var output bytes.Buffer
-	if err := parsed.Execute(&output, data); err != nil {
-		return nil, fmt.Errorf("渲染模板 %s 失败: %w", path, err)
-	}
-	return output.Bytes(), nil
+	return Text(string(content), data)
 }

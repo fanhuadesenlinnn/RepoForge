@@ -119,9 +119,6 @@ func applyDefaults(home string, cfg *Config) {
 	if cfg.Paths.LogDir == "" {
 		cfg.Paths.LogDir = filepath.Join(home, "logs")
 	}
-	if cfg.Paths.TemplateDir == "" {
-		cfg.Paths.TemplateDir = filepath.Join(home, "config", "templates")
-	}
 	if cfg.Server.Listen == "" {
 		cfg.Server.Listen = "0.0.0.0:8080"
 	}
@@ -150,7 +147,6 @@ func applyDefaults(home string, cfg *Config) {
 	cfg.Paths.CacheDir = expandHome(home, cfg.Paths.CacheDir)
 	cfg.Paths.ClientDir = expandHome(home, cfg.Paths.ClientDir)
 	cfg.Paths.LogDir = expandHome(home, cfg.Paths.LogDir)
-	cfg.Paths.TemplateDir = expandHome(home, cfg.Paths.TemplateDir)
 	cfg.Server.Root = expandHome(home, cfg.Server.Root)
 
 	for i := range cfg.Repositories {

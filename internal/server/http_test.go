@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/fanhuadesenlinnn/RepoForge/internal/executor"
@@ -94,5 +95,50 @@ func TestManagerEnableAndDisable(t *testing.T) {
 	}
 	if _, err := os.Stat(cfg.Server.Systemd.ServiceFile); !os.IsNotExist(err) {
 		t.Fatalf("service file still exists: %v", err)
+	}
+}
+
+// TestManagerEnableWithoutInit ensures server enable works with only the
+// embedded systemd template — no `repoforge init`, no config/templates dir.
+func TestManagerEnableWithoutInit(t *testing.T) {
+	home := t.TempDir()
+	// Only repo.yaml exists (simulating init v2 output); no config/templates.
+	if err := os.MkdirAll(filepath.Join(home, "config"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, "config", "repo.yaml"), []byte(`schema_version: 2
+paths:
+  repo_dir: `+filepath.Join(home, "repos")+`
+repositories:
+  - name: rocky
+    backend: rpm
+    upstream:
+      url: http://example.invalid
+    sync:
+      enabled: true
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := repo.Load(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(home, "config", "templates")); !os.IsNotExist(err) {
+		t.Fatalf("config/templates should not exist in init v2 layout")
+	}
+	cfg.Server.Systemd.ServiceFile = filepath.Join(t.TempDir(), "repoforge-server.service")
+	manager := NewManager(&fakeRunner{})
+	if err := manager.Enable(context.Background(), cfg, filepath.Join(home, "bin", "repoforge")); err != nil {
+		t.Fatalf("Enable without init failed: %v", err)
+	}
+	content, err := os.ReadFile(cfg.Server.Systemd.ServiceFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(content)
+	for _, want := range []string{"Description=RepoForge", "REPOFORGE_HOME=", "repoforge server start", "ReadOnlyPaths="} {
+		if !strings.Contains(s, want) {
+			t.Errorf("service file missing %q:\n%s", want, s)
+		}
 	}
 }

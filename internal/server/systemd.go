@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -12,6 +11,7 @@ import (
 	"github.com/fanhuadesenlinnn/RepoForge/internal/fileutil"
 	"github.com/fanhuadesenlinnn/RepoForge/internal/render"
 	"github.com/fanhuadesenlinnn/RepoForge/internal/repo"
+	"github.com/fanhuadesenlinnn/RepoForge/templates"
 )
 
 type systemdTemplateData struct {
@@ -33,12 +33,7 @@ func NewManager(runner executor.Runner) *Manager {
 
 // Enable installs, enables, and restarts the systemd service.
 func (m *Manager) Enable(ctx context.Context, cfg *repo.Config, executable string) error {
-	content, err := render.File(filepath.Join(cfg.Paths.TemplateDir, "repoforge-server.service.tpl"), systemdTemplateData{
-		Home:       cfg.Paths.HomeDir,
-		Executable: executable,
-		Restart:    cfg.Server.Systemd.Restart,
-		RepoDir:    cfg.Paths.RepoDir,
-	})
+	content, err := renderSystemd(cfg, executable)
 	if err != nil {
 		return err
 	}
@@ -59,6 +54,22 @@ func (m *Manager) Enable(ctx context.Context, cfg *repo.Config, executable strin
 		}
 	}
 	return nil
+}
+
+// renderSystemd renders the embedded systemd unit with the current config.
+// The unit is compiled into the binary, so server enable works without a
+// prior `repoforge init` and without any config/templates directory.
+func renderSystemd(cfg *repo.Config, executable string) ([]byte, error) {
+	raw, err := templates.ReadSystemdService()
+	if err != nil {
+		return nil, fmt.Errorf("读取内置 systemd 模板失败: %w", err)
+	}
+	return render.Text(string(raw), systemdTemplateData{
+		Home:       cfg.Paths.HomeDir,
+		Executable: executable,
+		Restart:    cfg.Server.Systemd.Restart,
+		RepoDir:    cfg.Paths.RepoDir,
+	})
 }
 
 // Stop stops the managed service when it exists.

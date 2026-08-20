@@ -35,12 +35,11 @@ type App struct {
 
 // Paths holds host runtime paths. auto expands to the detected home.
 type Paths struct {
-	HomeDir     string `yaml:"home_dir"`
-	RepoDir     string `yaml:"repo_dir"` // global repository root (unique source of truth)
-	CacheDir    string `yaml:"cache_dir"`
-	ClientDir   string `yaml:"client_dir"`
-	LogDir      string `yaml:"log_dir"`
-	TemplateDir string `yaml:"template_dir"`
+	HomeDir   string `yaml:"home_dir"`
+	RepoDir   string `yaml:"repo_dir"` // global repository root (unique source of truth)
+	CacheDir  string `yaml:"cache_dir"`
+	ClientDir string `yaml:"client_dir"`
+	LogDir    string `yaml:"log_dir"`
 }
 
 // Signing holds OpenPGP signing settings for generated repository metadata

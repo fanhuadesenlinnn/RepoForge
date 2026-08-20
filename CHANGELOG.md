@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- 变更：`init` 不再生成无用的 client/local 源模板（rpm-local/rpm-client/deb-local/deb-client）——`use`/`client` 命令本就硬编码生成配置，这些模板从未被读取；systemd 服务单元改为直接从二进制内置读取，`server enable` 不再依赖 `config/templates` 目录（未 init 也能用）。`init` 现在只生成一个配置文件 `config/repo.yaml`。
+- 移除：`paths.template_dir` 配置项与 `config/templates` 目录结构。
 - 新增：OpenPGP 签名（纯 Go，无 gpg 依赖）——`repoforge gpg init` 生成 Ed25519 密钥对，`gpg export` 导出公钥；`signing.enabled: true` 后 sync/make 自动签名：RPM 生成 `repomd.xml.asc`（yum repo_gpgcheck），DEB 生成 `Release` / `InRelease` / `Release.gpg`（apt Signed-By）。
 - 新增：zstd 压缩元数据支持——Fedora 39+ / openSUSE / 新版 EPEL 的 primary.xml.zst 与 DEB Packages.zst 均可解析（此前直接报错）。
 - 新增：`sync.delete_policy: prune-expired` 真正实现——配合 `sync.expire_days`（缺省 30 天），只删除上游已下线且本地副本超过宽限期的包，给客户端缓存留出缓冲期（此前与 prune 行为相同）。

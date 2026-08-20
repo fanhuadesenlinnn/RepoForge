@@ -70,7 +70,6 @@ func readDEBPackages(ctx context.Context, base, suite, comp, arch string) ([]Pkg
 	// Try uncompressed, then .gz, then .zst.
 	var data []byte
 	var err error
-	tried := []string{}
 	for _, suffix := range []string{"", ".gz", ".zst"} {
 		url := base + "/" + rel + suffix
 		data, err = Fetch(ctx, url)
@@ -83,22 +82,12 @@ func readDEBPackages(ctx context.Context, base, suite, comp, arch string) ([]Pkg
 			got, perr := parseDEBPackages(base, string(data))
 			return got, false, perr
 		}
-		tried = append(tried, suffix)
 	}
 	// All variants missing -> treat as absent component (not an error).
-	if missingPackages(err, tried) {
+	if strings.Contains(err.Error(), "404") {
 		return nil, true, nil
 	}
 	return nil, false, fmt.Errorf("读取 DEB Packages（%s/%s/%s）失败: %w", suite, comp, arch, err)
-}
-
-// missingPackages reports whether the error indicates every variant 404'd.
-func missingPackages(err error, tried []string) bool {
-	s := err.Error()
-	if !strings.Contains(s, "404") {
-		return false
-	}
-	return true
 }
 
 var debEntrySep = regexp.MustCompile(`\n\s*\n`)

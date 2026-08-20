@@ -148,7 +148,7 @@ func generatePrimaryXML(subset []upstream.Pkg) []byte {
 		fmt.Fprintf(&b, "    <arch>%s</arch>\n", xmlEscape(p.Arch))
 		fmt.Fprintf(&b, "    <version epoch=\"%s\" ver=\"%s\" rel=\"%s\"/>\n", xmlEscape(emptyEpoch(p.Epoch)), xmlEscape(p.Version), xmlEscape(p.Release))
 		href := strings.TrimPrefix(p.Location, "/")
-		fmt.Fprintf(&b, "    <checksum type=\"sha256\" pkgid=\"YES\">%s</checksum>\n", xmlEscape(p.Checksum))
+		fmt.Fprintf(&b, "    <checksum type=\"%s\" pkgid=\"YES\">%s</checksum>\n", xmlEscape(checksumType(p.ChecksumType)), xmlEscape(p.Checksum))
 		fmt.Fprintf(&b, "    <location href=\"%s\"/>\n", xmlEscape(href))
 		fmt.Fprintf(&b, "    <size package=\"%d\"/>\n", p.Size)
 		fmt.Fprintf(&b, "    <summary>%s</summary>\n", xmlEscape(p.Summary))

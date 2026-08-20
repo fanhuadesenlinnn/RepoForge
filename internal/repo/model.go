@@ -56,7 +56,6 @@ type Server struct {
 	Listen    string        `yaml:"listen"`
 	Root      string        `yaml:"root"`
 	PublicURL string        `yaml:"public_url"`
-	Readonly  bool          `yaml:"readonly"`
 	Systemd   ServerSystemd `yaml:"systemd"`
 }
 
@@ -81,7 +80,6 @@ type Repository struct {
 	Sync       Sync       `yaml:"sync"`
 	Input      Input      `yaml:"input"`
 	Dependency Dependency `yaml:"dependency"`
-	Local      LocalRepo  `yaml:"local"`
 	Client     ClientRepo `yaml:"client"`
 }
 
@@ -290,11 +288,6 @@ type Input struct {
 type Dependency struct {
 	WeakDeps  bool   `yaml:"weak_deps"` // include Recommends/Suggests
 	Conflicts string `yaml:"conflicts"` // report | resolve
-}
-
-// LocalRepo holds settings for enabling the local file:// repository (use).
-type LocalRepo struct {
-	EnabledExternal bool `yaml:"enabled_external"`
 }
 
 // ClientRepo holds settings for LAN/server distribution.

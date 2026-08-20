@@ -91,9 +91,7 @@ func Solve(ix *upstream.Index, request []string, opt SolveOptions) (map[string]u
 		}
 		selected[name] = *best
 		addedLoc[best.Location] = true
-		for _, r := range best.Requires {
-			queue = append(queue, r)
-		}
+		queue = append(queue, best.Requires...)
 	}
 
 	// Local packages parsed from package_dirs files: select them as-is (local
@@ -109,9 +107,7 @@ func Solve(ix *upstream.Index, request []string, opt SolveOptions) (map[string]u
 		}
 		selected[p.Name] = p
 		addedLoc[p.Location] = true
-		for _, r := range p.Requires {
-			queue = append(queue, r)
-		}
+		queue = append(queue, p.Requires...)
 		if opt.WeakDeps {
 			queue = append(queue, p.Recommends...)
 		}
@@ -221,13 +217,9 @@ func Solve(ix *upstream.Index, request []string, opt SolveOptions) (map[string]u
 			continue
 		}
 		addedLoc[best.Location] = true
-		for _, r := range best.Requires {
-			queue = append(queue, r)
-		}
+		queue = append(queue, best.Requires...)
 		if opt.WeakDeps {
-			for _, r := range best.Recommends {
-				queue = append(queue, r)
-			}
+			queue = append(queue, best.Recommends...)
 		}
 	}
 

@@ -407,3 +407,71 @@ repositories:
 		t.Fatalf("errors should mention checksum failure: %v", res.Errors)
 	}
 }
+
+// TestSyncSHA1MetadataWritesSHA1Primary verifies the verify:auto path: a repo
+// whose packages are checksummed with sha1 downloads+verifies with sha1, and
+// the generated primary.xml advertises the same algorithm (not hardcoded
+// sha256), so yum clients verify correctly.
+func TestSyncSHA1MetadataWritesSHA1Primary(t *testing.T) {
+	sha1Primary := func() []byte {
+		var b strings.Builder
+		b.WriteString(`<?xml version="1.0"?><metadata packages="3">` + "\n")
+		for _, p := range rpmPkgs {
+			b.WriteString("<package type=\"rpm\"><name>" + p.name + "</name><arch>" + p.arch + "</arch>")
+			b.WriteString("<version epoch=\"0\" ver=\"" + p.ver + "\" rel=\"" + p.rel + "\"/>")
+			b.WriteString("<checksum type=\"sha1\">" + sha1hex(p.content) + "</checksum>")
+			b.WriteString("<location href=\"" + p.path + "\"/><size package=\"" + itoa(len(p.content)) + "\"/>")
+			b.WriteString("<summary>pkg " + p.name + "</summary><format></format></package>\n")
+		}
+		b.WriteString("</metadata>")
+		return gzipBytes([]byte(b.String()))
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "repomd.xml") {
+			w.Write(rpmRepomd())
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "primary.xml.gz") {
+			w.Write(sha1Primary())
+			return
+		}
+		for _, p := range rpmPkgs {
+			if strings.HasSuffix(r.URL.Path, p.path) {
+				w.Write([]byte(p.content))
+				return
+			}
+		}
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+	home := t.TempDir()
+	content := fmt.Sprintf(`schema_version: 2
+paths:
+  repo_dir: %s/repos
+repositories:
+  - name: rocky
+    backend: rpm
+    upstream:
+      url: %s
+      verify: auto
+    sync:
+      enabled: true
+`, home, srv.URL)
+	cfg := loadConfig(t, home, content)
+	r := &cfg.Repositories[0]
+	variants, _ := repo.Expand(cfg, r)
+	res, err := Sync(context.Background(), cfg, &variants[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Errors) != 0 {
+		t.Fatalf("auto verify should pass with sha1 metadata: %v", res.Errors)
+	}
+	primary := readGeneratedPrimary(t, variants[0].ContentRoot(cfg))
+	if !strings.Contains(primary, `<checksum type="sha1" pkgid="YES">`) {
+		t.Fatalf("generated primary must advertise sha1 for sha1 packages:\n%s", primary)
+	}
+	if strings.Contains(primary, `<checksum type="sha256"`) {
+		t.Fatalf("generated primary must not hardcode sha256:\n%s", primary)
+	}
+}

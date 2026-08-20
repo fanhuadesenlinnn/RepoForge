@@ -11,13 +11,25 @@ permissions:
 
 jobs:
   test:
+    # 3 个 OS × amd64/arm64 全组合真实运行时测试。
+    # 注：ubuntu-24.04-arm / windows-11-arm 为 GitHub 公共预览 runner，
+    # 若仓库未启用需在 Settings → Actions → Runners 中开启。
     strategy:
       fail-fast: false
       matrix:
-        os:
-          - ubuntu-latest
-          - windows-latest
-          - macos-latest
+        include:
+          - os: ubuntu-latest
+            arch: amd64
+          - os: ubuntu-24.04-arm
+            arch: arm64
+          - os: windows-latest
+            arch: amd64
+          - os: windows-11-arm
+            arch: arm64
+          - os: macos-13
+            arch: amd64
+          - os: macos-14
+            arch: arm64
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
@@ -45,6 +57,7 @@ jobs:
       - name: Smoke test
         shell: bash
         run: |
+          echo "Running on $RUNNER_OS (${{ matrix.arch }})"
           bin_name="repoforge"
           if [[ "$RUNNER_OS" == "Windows" ]]; then
             bin_name="repoforge.exe"

@@ -39,10 +39,3 @@ func saveState(root string, s state) error {
 	}
 	return os.WriteFile(filepath.Join(root, "mirror-state.json"), data, 0o644)
 }
-
-func (s *state) add(loc, checksum string) {
-	if s.Packages == nil {
-		s.Packages = map[string]string{}
-	}
-	s.Packages[loc] = checksum
-}

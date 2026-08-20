@@ -38,7 +38,6 @@ server:                     # HTTP 分发服务（可选）
   listen: 0.0.0.0:8080
   root: ${home}/repos
   public_url: auto
-  readonly: true
   systemd:
     enabled: true
     service_name: repoforge-server

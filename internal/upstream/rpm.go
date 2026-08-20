@@ -284,10 +284,6 @@ type pkgRel struct {
 	Rel   string `xml:"rel,attr"`
 }
 
-func parsePrimaryXML(data []byte) ([]Pkg, error) {
-	return parsePrimaryXMLReader(bytes.NewReader(data))
-}
-
 // parsePrimaryXMLReader stream-decodes one <package> at a time so a 40MB
 // primary.xml (Kylin base) never sits in memory as a full DOM tree.
 func parsePrimaryXMLReader(r io.Reader) ([]Pkg, error) {

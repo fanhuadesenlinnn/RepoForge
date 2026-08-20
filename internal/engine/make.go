@@ -62,7 +62,7 @@ func Make(ctx context.Context, cfg *repo.Config, ev *repo.Expanded) (*MakeResult
 
 	opt := SolveOptions{
 		Backend:     r.Backend,
-		Archs:       archList(r),
+		Archs:       archList(r, ev.Vars),
 		WeakDeps:    r.Dependency.WeakDeps,
 		PreProvided: preProvided,
 	}

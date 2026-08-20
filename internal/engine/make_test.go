@@ -105,3 +105,38 @@ func TestMakeCombinedInputs(t *testing.T) {
 		t.Fatalf("problems: %v", res.Problems)
 	}
 }
+
+// archList must honor the expanded variant's $basearch so multi-arch configs
+// (same repo expanded into x86_64 and aarch64) solve against the right arch.
+func TestArchListFromVariantBasearch(t *testing.T) {
+	r := &repo.Repository{Backend: "rpm"}
+	cases := []struct {
+		vars map[string]string
+		want []string
+	}{
+		{nil, []string{"x86_64", "noarch"}},
+		{map[string]string{"basearch": "x86_64"}, []string{"x86_64", "noarch"}},
+		{map[string]string{"basearch": "aarch64"}, []string{"aarch64", "noarch"}},
+		{map[string]string{"basearch": "aarch64"}, []string{"aarch64", "noarch"}},
+	}
+	for _, c := range cases {
+		got := archList(r, c.vars)
+		if len(got) != len(c.want) {
+			t.Fatalf("archList(%v) = %v, want %v", c.vars, got, c.want)
+		}
+		for i := range got {
+			if got[i] != c.want[i] {
+				t.Fatalf("archList(%v) = %v, want %v", c.vars, got, c.want)
+			}
+		}
+	}
+	// Explicit upstream.arch and target.arch still take priority.
+	rt := &repo.Repository{Backend: "rpm", Target: repo.Target{Arch: "s390x"}}
+	if got := archList(rt, map[string]string{"basearch": "aarch64"}); got[0] != "s390x" {
+		t.Fatalf("target.arch should win, got %v", got)
+	}
+	ru := &repo.Repository{Backend: "rpm", Upstream: repo.Upstream{Arch: []string{"ppc64le"}}}
+	if got := archList(ru, map[string]string{"basearch": "aarch64"}); got[0] != "ppc64le" {
+		t.Fatalf("upstream.arch should win, got %v", got)
+	}
+}

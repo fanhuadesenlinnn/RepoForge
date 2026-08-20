@@ -179,7 +179,12 @@ func archOKFor(p upstream.Pkg, archs []string, backend string) bool {
 }
 
 // archList returns the build architecture list (used by dependency solving).
-func archList(r *repo.Repository) []string {
+// Priority: upstream.arch > target.arch > the expanded variant's $basearch
+// > backend default. The $basearch step matters for multi-arch configs that
+// expand the same repo into x86_64 and aarch64 variants: without it, the
+// aarch64 variant would be solved against x86_64-only packages and resolve
+// nothing.
+func archList(r *repo.Repository, vars map[string]string) []string {
 	if len(r.Upstream.Arch) > 0 {
 		return append([]string{}, r.Upstream.Arch...)
 	}
@@ -188,6 +193,12 @@ func archList(r *repo.Repository) []string {
 			return []string{r.Target.Arch, "noarch"}
 		}
 		return []string{r.Target.Arch, "all"}
+	}
+	if base := vars["basearch"]; base != "" {
+		if r.Backend == "rpm" {
+			return []string{base, "noarch"}
+		}
+		return []string{base, "all"}
 	}
 	if r.Backend == "rpm" {
 		return []string{"x86_64", "noarch"}

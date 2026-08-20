@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## v1.1.2
+
+- 修复：多架构仓库（`$basearch` 展开为 x86_64 + aarch64 等）依赖求解时架构过滤错误——aarch64 variant 会被按 x86_64 过滤导致选 0 包、报“无法满足依赖”。`archList` 现在从展开变体的 `$basearch` 推断架构。
+
 ## v1.1.1
 
 - 修复：Windows 平台路径处理——`input.package_dirs` 不再把 `C:\...` 按 `:` 拆错盘符；`${home}` 前缀路径统一分隔符。

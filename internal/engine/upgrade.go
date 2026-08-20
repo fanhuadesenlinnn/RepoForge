@@ -32,7 +32,7 @@ func MakeUpgrade(ctx context.Context, cfg *repo.Config, ev *repo.Expanded, insta
 	}
 	opt := SolveOptions{
 		Backend: ev.Repository.Backend,
-		Archs:   archList(ev.Repository),
+		Archs:   archList(ev.Repository, ev.Vars),
 	}
 	names, notices := upgradesFromInstalled(ix, installed, opt)
 	progress.Infof(ctx, "[升级] 发现 %d 个可升级包", len(names))

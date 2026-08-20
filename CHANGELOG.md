@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## v1.2.0
+
+- 新增：`input.package_dirs` 本地包完整发布——解析本地 rpm/deb 文件自身元数据（名称/版本/架构/依赖），本地包直接进依赖求解并写入 repodata，其缺失依赖自动从上游下载。第三方/内网包不再只是“复制文件”，客户端 yum/apt 可直接安装。
+- 变更：本地包与上游版本冲突时**以本地版本为准**（不再改用上游版本），上游版本有差异时不再提示切换。
+- 新增：本地 deb 解析（ar 归档 + control，支持 gz/xz/zst 压缩）；rpm 解析使用纯 Go 库（无需本机 rpm/createrepo）。
+- 新增依赖：`cavaliergopher/rpm`、`ulikunitz/xz`、`klauspost/compress`。
+
 ## v1.1.6
 
 - 修复：`input.package_dirs` 的本地包与上游重复下载——本地副本复制在输出根目录（flat），上游下载在 `Packages/` 下，导致同包出现两份且 flat 副本不在 repodata。现在本地包与上游同名（同 NEVRA）时移到上游位置进 repodata；版本不同时删除本地副本、采用上游版本并提示。

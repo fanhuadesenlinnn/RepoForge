@@ -170,3 +170,42 @@ func TestSolveNoticesForConditional(t *testing.T) {
 		t.Fatalf("notices = %v, want 1", notices)
 	}
 }
+
+// Local packages parsed from package_dirs must win over upstream versions and
+// their dependencies must be resolved.
+func TestSolveLocalPkgsWin(t *testing.T) {
+	ix := &upstream.Index{Packages: []upstream.Pkg{
+		{Name: "vim", Version: "8.2", Release: "1", Arch: "x86_64", Location: "Packages/v/vim.rpm"},
+		{Name: "glibc", Version: "2.34", Release: "1", Arch: "x86_64", Location: "Packages/g/glibc.rpm"},
+	}}
+	// Local vim 9.0 (different version than upstream) + local third-party mylocal.
+	local := []upstream.Pkg{
+		{Name: "vim", Version: "9.0", Release: "1", Arch: "x86_64", Location: "Packages/vim-9.0.rpm", Local: true,
+			Requires: []upstream.DependencyEntry{{Name: "glibc"}}},
+		{Name: "mylocal", Version: "1.0", Release: "1", Arch: "x86_64", Location: "Packages/mylocal.rpm", Local: true,
+			Requires: []upstream.DependencyEntry{{Name: "vim"}}},
+	}
+	selected, problems, notices := Solve(ix, []string{"mylocal"}, SolveOptions{
+		Backend: "rpm", Archs: []string{"x86_64", "noarch"}, LocalPkgs: local,
+	})
+	if len(problems) != 0 {
+		t.Fatalf("problems: %v", problems)
+	}
+	// Local vim wins (9.0), upstream 8.2 not downloaded.
+	vim, ok := selected["vim"]
+	if !ok {
+		t.Fatal("vim not selected")
+	}
+	if vim.Version != "9.0" || !vim.Local {
+		t.Fatalf("vim = %+v, want local 9.0", vim)
+	}
+	// mylocal selected + glibc dep resolved.
+	if _, ok := selected["mylocal"]; !ok {
+		t.Fatal("mylocal not selected")
+	}
+	glibc, ok := selected["glibc"]
+	if !ok || glibc.Location != "Packages/g/glibc.rpm" {
+		t.Fatalf("glibc dep not resolved: %+v", glibc)
+	}
+	_ = notices
+}

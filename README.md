@@ -141,9 +141,10 @@ repositories:
 - **目录**：全局 `paths.repo_dir` 定根；仓库级 `repo_dir` 可选覆盖（为该仓库内容根）；
   多架构/套件自动展开子目录，无需手写。
 - **制作方式**：配 `sync` → `repoforge sync` 整仓镜像；配 `input.packages` → `repoforge make` 按需。
-- **`input.package_dirs`**：本地已有包目录（可多个），复制进离线源并只补缺失依赖。
+- **`input.package_dirs`**：本地已有包目录（可多个），**完整发布进离线源**——解析本地 rpm/deb 自身元数据（含依赖），本地包写入 repodata（客户端可直接安装），其缺失依赖自动从上游下载。
   - 相对路径会先按当前目录、再按 RepoForge home 解析（如 `package_dirs: [tem-rpm-x86]`）。
-  - **按架构过滤**：每个多架构 variant 只复制匹配架构的包（`noarch` 总是匹配），其他架构的包会提示跳过，不会混入错误架构的目录。
+  - **按架构过滤**：每个多架构 variant 只发布匹配架构的包（`noarch` 总是匹配），其他架构的包会提示跳过。
+  - **本地版本优先**：本地包与上游版本冲突时以本地为准（想要上游新版请用 `upgrade_packages`）。
   - 多个目录可分别放不同架构的包；同一目录内也可以混放多架构（如 x86_64 + noarch）。
 - **下载性能**：`sync.concurrency` 多文件并行数（默认 8）；`sync.segment_threshold` 每段大小 MiB
   （默认 20）；`sync.segment`（`false`=不分片 / 正整数=单文件分段上限 / 缺省=智能默认8）；

@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/fanhuadesenlinnn/RepoForge/internal/progress"
 	"github.com/fanhuadesenlinnn/RepoForge/internal/repo"
 	"github.com/fanhuadesenlinnn/RepoForge/internal/upstream"
 )
@@ -48,34 +47,31 @@ func Make(ctx context.Context, cfg *repo.Config, ev *repo.Expanded) (*MakeResult
 		return nil, err
 	}
 
-	// 1) Copy local input packages into the output dir and collect their names
-	// as pre-provided (already available) starting points, so only their missing
-	// dependencies get resolved/fetched.
+	// 1) Copy local input packages into the output dir, parse their real
+	// metadata (deps included), and let the solver select them as-is and
+	// resolve their dependencies. Local packages are published into the repo;
+	// they are not just "starting points".
 	copied := 0
 	skippedLocal := 0
-	var preProvided []string
-	var localCopies map[string]string // package name -> flat file name copied into root
-	var baseRequests []string         // union of input.packages + upgrade names
+	var localPkgs []upstream.Pkg
+	var baseRequests []string // union of input.packages + upgrade names
 	baseRequests = append(baseRequests, r.Input.Packages...)
 
 	if len(r.Input.PackageDirs) > 0 {
-		var names []string
-		var n, skipped int
-		var err error
-		names, localCopies, n, skipped, _, err = collectAndCopyInput(ctx, r, root, archList(r, ev.Vars), cfg.Paths.HomeDir)
+		pkgs, n, skipped, _, err := collectLocalPkgs(ctx, r, root, archList(r, ev.Vars), cfg.Paths.HomeDir)
 		if err != nil {
 			return nil, err
 		}
 		copied += n
 		skippedLocal += skipped
-		preProvided = append(preProvided, names...)
+		localPkgs = append(localPkgs, pkgs...)
 	}
 
 	opt := SolveOptions{
-		Backend:     r.Backend,
-		Archs:       archList(r, ev.Vars),
-		WeakDeps:    r.Dependency.WeakDeps,
-		PreProvided: preProvided,
+		Backend:   r.Backend,
+		Archs:     archList(r, ev.Vars),
+		WeakDeps:  r.Dependency.WeakDeps,
+		LocalPkgs: localPkgs,
 	}
 
 	// 2) upgrade_packages: add each name to the solve request so the latest
@@ -103,34 +99,18 @@ func Make(ctx context.Context, cfg *repo.Config, ev *repo.Expanded) (*MakeResult
 		subset = append(subset, p)
 	}
 
-	// 4) Download selected (non-local) packages into root.
-	// Local package_dirs copies landed flat in root. When the upstream index
-	// carries the same NEVRA (same file name), move the local copy to the
-	// upstream Location so the on-disk layout matches the generated repodata;
-	// when the versions differ, drop the local copy and fetch the upstream one
-	// (with a notice), so repodata and disk stay consistent.
+	// 4) Download selected (non-local) packages into root. Local packages were
+	// already copied into root/Packages by collectLocalPkgs.
 	var items []downloadItem
 	for _, p := range subset {
+		if p.Local {
+			continue // file already present under root/Packages
+		}
 		loc := strings.TrimPrefix(p.Location, "/")
 		dst := filepath.Join(root, filepath.FromSlash(loc))
 		if _, err := os.Stat(dst); err == nil {
 			os.Remove(partPath(dst))
 			continue
-		}
-		if flat, ok := localCopies[p.Name]; ok {
-			flatPath := filepath.Join(root, flat)
-			if filepath.Base(flat) == filepath.Base(loc) {
-				// Same NEVRA: adopt the local copy at the upstream location.
-				if err := os.MkdirAll(filepath.Dir(dst), 0o755); err == nil {
-					if err := os.Rename(flatPath, dst); err == nil {
-						continue
-					}
-				}
-			}
-			// Version differs from upstream (or move failed): discard the
-			// local copy and fetch the upstream version for index consistency.
-			os.Remove(flatPath)
-			progress.Infof(ctx, "[输入] 本地包 %s 与上游版本不同（上游 %s），已采用上游版本", flat, filepath.Base(loc))
 		}
 		items = append(items, downloadItem{
 			URL:      pkgURL(ix, p),

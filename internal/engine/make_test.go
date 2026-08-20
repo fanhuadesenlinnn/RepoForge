@@ -13,16 +13,16 @@ import (
 )
 
 // TestMakeInputCopy verifies input.package_dirs files are copied into the output
-// root and their names are treated as starting points.
+// Packages/ dir with their metadata parsed, and their deps get downloaded.
 func TestMakeInputCopy(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(rpmHandler))
 	defer srv.Close()
 	home := t.TempDir()
 
-	// create an input dir with a fake "tree" rpm (Copied, not downloaded)
+	// real local rpm (Requires: vim); copied, not downloaded
 	inDir := filepath.Join(home, "input")
 	os.MkdirAll(inDir, 0o755)
-	os.WriteFile(filepath.Join(inDir, "tree-1.7.0-1.el8.x86_64.rpm"), []byte("fake-tree"), 0o644)
+	copyTestdata(t, filepath.Join(inDir, "mylocal-1.0-1.x86_64.rpm"), "mylocal-1.0-1.x86_64.rpm")
 
 	content := "schema_version: 2\n" +
 		"paths:\n  repo_dir: " + home + "/repos\n" +
@@ -41,8 +41,12 @@ func TestMakeInputCopy(t *testing.T) {
 		t.Fatalf("copied = %d, want 1", res.Copied)
 	}
 	root := variants[0].ContentRoot(cfg)
-	if _, err := os.Stat(filepath.Join(root, "tree-1.7.0-1.el8.x86_64.rpm")); err != nil {
+	if _, err := os.Stat(filepath.Join(root, "Packages", "mylocal-1.0-1.x86_64.rpm")); err != nil {
 		t.Fatalf("input package not copied: %v", err)
+	}
+	// mylocal's dependency (vim) resolved and downloaded.
+	if res.Downloaded != 3 { // vim + glibc + glibc-common
+		t.Fatalf("downloaded = %d, want 3 (mylocal's deps)", res.Downloaded)
 	}
 }
 
@@ -70,8 +74,8 @@ func TestMakeCombinedInputs(t *testing.T) {
 
 	inDir := filepath.Join(home, "pkgs")
 	os.MkdirAll(inDir, 0o755)
-	// pre-existing local vim-common rpm (copied; vim's dep)
-	os.WriteFile(filepath.Join(inDir, "vim-common-8.2-1.el8.x86_64.rpm"), []byte("lok"), 0o644)
+	// real local rpm (Requires: vim); copied, its dep vim is also requested
+	copyTestdata(t, filepath.Join(inDir, "mylocal-1.0-1.x86_64.rpm"), "mylocal-1.0-1.x86_64.rpm")
 
 	content := "schema_version: 2\n" +
 		"paths:\n  repo_dir: " + home + "/repos\n" +
@@ -93,8 +97,8 @@ func TestMakeCombinedInputs(t *testing.T) {
 		t.Fatalf("copied = %d, want 1", res.Copied)
 	}
 	root := variants[0].ContentRoot(cfg)
-	// input file copied
-	if _, err := os.Stat(filepath.Join(root, "vim-common-8.2-1.el8.x86_64.rpm")); err != nil {
+	// input file copied into Packages/
+	if _, err := os.Stat(filepath.Join(root, "Packages", "mylocal-1.0-1.x86_64.rpm")); err != nil {
 		t.Fatalf("input package not copied: %v", err)
 	}
 	// Repodata generated with no hard problems.
@@ -145,65 +149,75 @@ func TestArchListFromVariantBasearch(t *testing.T) {
 // collectAndCopyInput must only copy packages whose architecture matches the
 // variant's arch set (noarch always matches), and report skipped ones, so a
 // mixed-arch package_dirs directory works per variant.
-func TestCollectAndCopyInputArchFilter(t *testing.T) {
+func TestCollectLocalPkgsArchFilter(t *testing.T) {
 	home := t.TempDir()
 	inDir := filepath.Join(home, "mixed")
 	os.MkdirAll(inDir, 0o755)
-	for _, f := range []string{
-		"vim-enhanced-9.0-1.ky10.x86_64.rpm",
-		"glibc-2.28-1.ky10.x86_64.rpm",
-		"tzdata-2022a-1.ky10.noarch.rpm",
-		"bash-5.0-1.ky10.aarch64.rpm",
-	} {
-		os.WriteFile(filepath.Join(inDir, f), []byte("x"), 0o644)
-	}
+	// Real rpm fixtures: x86_64 (Requires: vim) and noarch (Requires: tree).
+	copyTestdata(t, filepath.Join(inDir, "mylocal-1.0-1.x86_64.rpm"), "mylocal-1.0-1.x86_64.rpm")
+	copyTestdata(t, filepath.Join(inDir, "mylocal-1.0-1.noarch.rpm"), "mylocal-1.0-1.noarch.rpm")
+
 	r := &repo.Repository{
 		Backend: "rpm",
 		Input:   repo.Input{PackageDirs: []string{inDir}},
 	}
-	root := filepath.Join(home, "out")
 	ctx := context.Background()
 
-	// x86_64 variant: copies x86_64 + noarch, skips aarch64.
-	names, _, copied, skipped, byArch, err := collectAndCopyInput(ctx, r, root, []string{"x86_64", "noarch"}, home)
+	// x86_64 variant: both packages match, metadata is parsed.
+	root := filepath.Join(home, "out")
+	pkgs, copied, skipped, byArch, err := collectLocalPkgs(ctx, r, root, []string{"x86_64", "noarch"}, home)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if copied != 3 {
-		t.Fatalf("copied = %d, want 3", copied)
+	if copied != 2 || skipped != 0 {
+		t.Fatalf("copied=%d skipped=%d (%v), want 2/0", copied, skipped, byArch)
 	}
-	if skipped != 1 || byArch["aarch64"] != 1 {
-		t.Fatalf("skipped = %d (%v), want 1 aarch64", skipped, byArch)
+	if len(pkgs) != 2 {
+		t.Fatalf("localPkgs = %d, want 2", len(pkgs))
 	}
-	got := map[string]bool{}
-	for _, n := range names {
-		got[n] = true
-	}
-	for _, want := range []string{"vim-enhanced", "glibc", "tzdata"} {
-		if !got[want] {
-			t.Errorf("missing pre-provided name %q in %v", want, names)
+	gotReq := map[string]bool{}
+	for _, p := range pkgs {
+		if !p.Local {
+			t.Errorf("package %s must be marked Local", p.Name)
+		}
+		if !strings.HasPrefix(p.Location, "Packages/") {
+			t.Errorf("location %q must be under Packages/", p.Location)
+		}
+		for _, r := range p.Requires {
+			gotReq[r.Name] = true
 		}
 	}
-	for _, f := range []string{"vim-enhanced-9.0-1.ky10.x86_64.rpm", "glibc-2.28-1.ky10.x86_64.rpm", "tzdata-2022a-1.ky10.noarch.rpm"} {
-		if _, err := os.Stat(filepath.Join(root, f)); err != nil {
-			t.Errorf("expected copied file %s: %v", f, err)
-		}
+	if !gotReq["vim"] || !gotReq["tree"] {
+		t.Errorf("deps not parsed, got %v", gotReq)
 	}
-	if _, err := os.Stat(filepath.Join(root, "bash-5.0-1.ky10.aarch64.rpm")); err == nil {
-		t.Error("aarch64 rpm must not be copied into x86_64 variant")
+	for _, f := range []string{"mylocal-1.0-1.x86_64.rpm", "mylocal-1.0-1.noarch.rpm"} {
+		if _, err := os.Stat(filepath.Join(root, "Packages", f)); err != nil {
+			t.Errorf("expected copied file Packages/%s: %v", f, err)
+		}
 	}
 
-	// aarch64 variant: copies aarch64 + noarch, skips x86_64.
+	// aarch64 variant: noarch matches, x86_64 is skipped before parsing.
 	root2 := filepath.Join(home, "out2")
-	_, _, copied2, skipped2, byArch2, err := collectAndCopyInput(ctx, r, root2, []string{"aarch64", "noarch"}, home)
+	pkgs2, copied2, skipped2, byArch2, err := collectLocalPkgs(ctx, r, root2, []string{"aarch64", "noarch"}, home)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if copied2 != 2 {
-		t.Fatalf("aarch64 copied = %d, want 2", copied2)
+	if copied2 != 1 || skipped2 != 1 || byArch2["x86_64"] != 1 {
+		t.Fatalf("aarch64 copied=%d skipped=%d (%v), want 1/1 x86_64", copied2, skipped2, byArch2)
 	}
-	if skipped2 != 2 || byArch2["x86_64"] != 2 {
-		t.Fatalf("aarch64 skipped = %d (%v), want 2 x86_64", skipped2, byArch2)
+	if len(pkgs2) != 1 || pkgs2[0].Arch != "noarch" {
+		t.Fatalf("aarch64 localPkgs = %+v, want single noarch", pkgs2)
+	}
+}
+
+func copyTestdata(t *testing.T, dst, src string) {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join("testdata", src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dst, data, 0o644); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -223,17 +237,17 @@ func TestPkgArchFromFile(t *testing.T) {
 	}
 }
 
-// A local package_dirs copy with the same NEVRA as an upstream package must be
-// adopted at the upstream Location (no duplicate download, no flat leftover),
-// and its dependencies still get fetched.
-func TestMakeLocalCopySameVersionAdopted(t *testing.T) {
+// A third-party local package (not present in upstream metadata) must be
+// published into the repo (file + repodata entry) AND its dependencies must
+// be resolved and downloaded from upstream.
+func TestMakeLocalThirdPartyPublishedWithDeps(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(rpmHandler))
 	defer srv.Close()
 	home := t.TempDir()
 
 	inDir := filepath.Join(home, "local")
 	os.MkdirAll(inDir, 0o755)
-	os.WriteFile(filepath.Join(inDir, "vim.rpm"), []byte("local-vim-content"), 0o644)
+	copyTestdata(t, filepath.Join(inDir, "mylocal-1.0-1.x86_64.rpm"), "mylocal-1.0-1.x86_64.rpm") // Requires: vim
 
 	content := "schema_version: 2\npaths:\n  repo_dir: " + home + "/repos\n" +
 		"repositories:\n  - name: x\n    backend: rpm\n    upstream:\n      url: " + srv.URL + "\n" +
@@ -247,60 +261,24 @@ func TestMakeLocalCopySameVersionAdopted(t *testing.T) {
 	}
 	root := variants[0].ContentRoot(cfg)
 
-	data, err := os.ReadFile(filepath.Join(root, "Packages/v/vim.rpm"))
-	if err != nil {
-		t.Fatalf("vim not adopted at upstream location: %v", err)
+	// Local package file published under Packages/.
+	if _, err := os.Stat(filepath.Join(root, "Packages", "mylocal-1.0-1.x86_64.rpm")); err != nil {
+		t.Fatalf("local package not published: %v", err)
 	}
-	if string(data) != "local-vim-content" {
-		t.Fatalf("vim content = %q, want the local copy", data)
+	// Local package appears in the generated repodata.
+	primary := readGeneratedPrimary(t, root)
+	if !strings.Contains(primary, "mylocal-1.0-1.x86_64.rpm") {
+		t.Error("repodata does not list the local third-party package")
 	}
-	if _, err := os.Stat(filepath.Join(root, "vim.rpm")); err == nil {
-		t.Error("flat duplicate vim.rpm must not remain")
+	// Its dependency (vim) plus vim's deps (glibc, glibc-common) were fetched.
+	if res.Downloaded != 3 {
+		t.Fatalf("downloaded = %d, want 3 (vim + glibc + glibc-common)", res.Downloaded)
 	}
-	if res.Downloaded != 2 { // only vim's deps: glibc + glibc-common
-		t.Fatalf("downloaded = %d, want 2 (deps only, vim from local)", res.Downloaded)
+	if res.Copied != 1 {
+		t.Fatalf("copied = %d, want 1", res.Copied)
 	}
-	// repodata must reference the adopted local vim.
-	if !strings.Contains(readGeneratedPrimary(t, root), "vim.rpm") {
-		t.Error("repodata does not list vim.rpm")
-	}
-}
-
-// A local copy whose version differs from upstream is discarded and the
-// upstream version fetched instead, so disk layout and repodata stay consistent.
-func TestMakeLocalCopyVersionMismatchUsesUpstream(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(rpmHandler))
-	defer srv.Close()
-	home := t.TempDir()
-
-	inDir := filepath.Join(home, "local")
-	os.MkdirAll(inDir, 0o755)
-	// Different file name (different NEVRA) than upstream vim.rpm.
-	os.WriteFile(filepath.Join(inDir, "vim-9.0-1.ky10.x86_64.rpm"), []byte("local-vim-content"), 0o644)
-
-	content := "schema_version: 2\npaths:\n  repo_dir: " + home + "/repos\n" +
-		"repositories:\n  - name: x\n    backend: rpm\n    upstream:\n      url: " + srv.URL + "\n" +
-		"    input:\n      package_dirs: [" + inDir + "]\n"
-	cfg := loadConfigForMake(t, home, content)
-	r := &cfg.Repositories[0]
-	variants, _ := repo.Expand(cfg, r)
-	res, err := Make(context.Background(), cfg, &variants[0])
-	if err != nil {
-		t.Fatal(err)
-	}
-	root := variants[0].ContentRoot(cfg)
-
-	data, err := os.ReadFile(filepath.Join(root, "Packages/v/vim.rpm"))
-	if err != nil {
-		t.Fatalf("upstream vim missing: %v", err)
-	}
-	if string(data) != "vim-content" {
-		t.Fatalf("vim content = %q, want the upstream copy", data)
-	}
-	if _, err := os.Stat(filepath.Join(root, "vim-9.0-1.ky10.x86_64.rpm")); err == nil {
-		t.Error("discarded local copy must not remain")
-	}
-	if res.Downloaded != 3 { // vim + glibc + glibc-common
-		t.Fatalf("downloaded = %d, want 3", res.Downloaded)
+	// No problem should remain (vim resolves fine).
+	if len(res.Problems) != 0 {
+		t.Fatalf("unexpected problems: %v", res.Problems)
 	}
 }

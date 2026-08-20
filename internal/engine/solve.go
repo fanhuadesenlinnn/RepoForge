@@ -16,6 +16,11 @@ type SolveOptions struct {
 	// input.package_dirs). They are treated as satisfied — not re-downloaded —
 	// but their dependencies are still resolved and fetched.
 	PreProvided []string
+	// LocalPkgs are complete package entries parsed from local package files
+	// (input.package_dirs). They are selected as-is (local version wins over
+	// any upstream version), their dependencies are resolved, and they are
+	// published into the repo. Prefer LocalPkgs over PreProvided.
+	LocalPkgs []upstream.Pkg
 }
 
 // Solve computes the set of package locations needed to satisfy the requested
@@ -71,6 +76,27 @@ func Solve(ix *upstream.Index, request []string, opt SolveOptions) (map[string]u
 		}
 	}
 
+	// Local packages parsed from package_dirs files: select them as-is (local
+	// version wins), enqueue their dependencies, and never download them again.
+	for _, p := range opt.LocalPkgs {
+		if !archOK(p) {
+			continue
+		}
+		if prev, ok := selected[p.Name]; ok {
+			// A non-local package was already selected for this name (e.g. an
+			// explicit request); the local copy still wins.
+			delete(addedLoc, prev.Location)
+		}
+		selected[p.Name] = p
+		addedLoc[p.Location] = true
+		for _, r := range p.Requires {
+			queue = append(queue, r)
+		}
+		if opt.WeakDeps {
+			queue = append(queue, p.Recommends...)
+		}
+	}
+
 	for len(queue) > 0 {
 		dep := queue[0]
 		queue = queue[1:]
@@ -110,6 +136,12 @@ func Solve(ix *upstream.Index, request []string, opt SolveOptions) (map[string]u
 			if satisfies(existing, dep, opt.Backend) {
 				continue
 			}
+			// A local package always wins: keep the local version even when it
+			// does not satisfy a versioned requirement, and report it.
+			if existing.Local {
+				notices = append(notices, fmt.Sprintf("本地包 %s 不满足依赖 %s（已保留本地版本）", existing.NEVRA(), dep.String()))
+				continue
+			}
 			// still try to find a better provider
 		}
 
@@ -124,6 +156,10 @@ func Solve(ix *upstream.Index, request []string, opt SolveOptions) (map[string]u
 			continue
 		}
 		if prev, ok := selected[dep.Name]; ok && prev.Location != best.Location {
+			if prev.Local {
+				notices = append(notices, fmt.Sprintf("本地包 %s 优先于上游 %s（已保留本地版本）", prev.NEVRA(), best.NEVRA()))
+				continue
+			}
 			problems = append(problems, fmt.Sprintf("依赖冲突: %s 同时要求 %s 和 %s", dep.Name, prev.NEVRA(), best.NEVRA()))
 			continue
 		}

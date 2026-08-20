@@ -62,6 +62,10 @@ type Pkg struct {
 	// BaseURL, when non-empty, is the source this package came from (aggregate
 	// repos). Used to resolve downloads from the correct upstream.
 	BaseURL string
+	// Local marks a package that came from input.package_dirs (its metadata was
+	// read from the local file, not from upstream metadata). Local packages are
+	// published into the repo as-is and their dependencies are still resolved.
+	Local bool
 }
 
 // Resolve returns the absolute URL for this package's Location, honoring a

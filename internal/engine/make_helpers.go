@@ -14,31 +14,28 @@ import (
 	"github.com/fanhuadesenlinnn/RepoForge/internal/upstream"
 )
 
-// collectAndCopyInput scans input.package_dirs for existing rpm/deb files,
-// copies the ones whose architecture matches the variant's arch set into root,
-// and returns the package names to use as starting points (parsed from
-// filenames), how many files were copied, how many were skipped because their
-// architecture does not match this variant, and the skipped arch breakdown.
-// A single directory may mix architectures (e.g. x86_64 + noarch); different
-// directories may target different architectures. noarch/all always match.
-func collectAndCopyInput(ctx context.Context, r *repo.Repository, root string, archs []string, home string) (names []string, localCopies map[string]string, copied, skipped int, skippedByArch map[string]int, err error) {
-	if err := os.MkdirAll(root, 0o755); err != nil {
-		return nil, nil, 0, 0, nil, err
+// collectLocalPkgs scans input.package_dirs for rpm/deb files, filters them by
+// the variant's architecture set, parses each file's real metadata (name,
+// version, dependencies), copies matching files into root/Packages/, and
+// returns the parsed package entries. Local packages are published into the
+// repo as-is and their dependencies are resolved like any other package.
+func collectLocalPkgs(ctx context.Context, r *repo.Repository, root string, archs []string, home string) (localPkgs []upstream.Pkg, copied, skipped int, skippedByArch map[string]int, err error) {
+	pkgDir := filepath.Join(root, "Packages")
+	if err := os.MkdirAll(pkgDir, 0o755); err != nil {
+		return nil, 0, 0, nil, err
 	}
 	var files []string
 	for _, dir := range r.Input.PackageDirs {
 		resolved := resolveInputDir(dir, home)
 		f, err := scanPackageFiles(resolved, r.Backend, r.Input.Recursive)
 		if err != nil {
-			return nil, nil, 0, 0, nil, err
+			return nil, 0, 0, nil, err
 		}
 		progress.Infof(ctx, "[输入] 目录 %s：找到 %d 个 %s 文件", dir, len(f), r.Backend)
 		files = append(files, f...)
 	}
 	sort.Strings(files)
 
-	namesMap := map[string]bool{}
-	localCopies = map[string]string{} // package name -> flat file name in root
 	skippedByArch = map[string]int{}
 	for _, src := range files {
 		fileArch := pkgArchFromFile(src, r.Backend)
@@ -47,23 +44,20 @@ func collectAndCopyInput(ctx context.Context, r *repo.Repository, root string, a
 			skippedByArch[fileArch]++
 			continue
 		}
-		name := pkgNameFromFile(src, r.Backend)
-		if name != "" {
-			namesMap[name] = true
-			localCopies[name] = filepath.Base(src)
+		base := filepath.Base(src)
+		pkg, err := upstream.ParseLocalPackage(src, "Packages/"+base, r.Backend)
+		if err != nil {
+			return nil, 0, 0, nil, err
 		}
-		dst := filepath.Join(root, filepath.Base(src))
+		dst := filepath.Join(pkgDir, base)
 		if err := copyFileIfNeeded(src, dst); err != nil {
-			return nil, nil, 0, 0, nil, err
+			return nil, 0, 0, nil, err
 		}
+		localPkgs = append(localPkgs, *pkg)
 		copied++
 	}
-	out := make([]string, 0, len(namesMap))
-	for n := range namesMap {
-		out = append(out, n)
-	}
 	if copied > 0 {
-		progress.Infof(ctx, "[输入] 复制 %d 个本地包（架构匹配）", copied)
+		progress.Infof(ctx, "[输入] 复制 %d 个本地包（架构匹配，已解析元数据）", copied)
 	}
 	if skipped > 0 {
 		var parts []string
@@ -73,7 +67,7 @@ func collectAndCopyInput(ctx context.Context, r *repo.Repository, root string, a
 		sort.Strings(parts)
 		progress.Infof(ctx, "[输入] 跳过 %d 个架构不匹配的包（%s）", skipped, strings.Join(parts, ", "))
 	}
-	return out, localCopies, copied, skipped, skippedByArch, nil
+	return localPkgs, copied, skipped, skippedByArch, nil
 }
 
 // resolveInputDir resolves a package_dirs entry. Relative paths are first

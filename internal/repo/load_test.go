@@ -340,3 +340,46 @@ repositories:
 		t.Fatalf("URL = %q", variants[0].URL)
 	}
 }
+
+// Multi-arch basearch declared in sources vars must still split the content
+// root into per-architecture subdirectories (same rule as variant expansion),
+// so variants do not overwrite each other's output.
+func TestContentRootMultiArchFromSourcesVars(t *testing.T) {
+	content := `schema_version: 2
+paths:
+  repo_dir: ${home}/repos
+repositories:
+  - name: multiarch
+    backend: rpm
+    upstream:
+      sources:
+        - url: http://x/base/$basearch/
+          vars:
+            - name: basearch
+              values: [x86_64, aarch64]
+    sync:
+      enabled: true
+`
+	cfg := loadRepoConfig(t, content)
+	r := &cfg.Repositories[0]
+	variants, err := Expand(cfg, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(variants) != 2 {
+		t.Fatalf("expected 2 variants, got %d", len(variants))
+	}
+	roots := map[string]bool{}
+	for _, v := range variants {
+		roots[v.ContentRoot(cfg)] = true
+	}
+	want := map[string]bool{
+		filepath.Join(cfg.Paths.RepoDir, "multiarch", "x86_64"):  true,
+		filepath.Join(cfg.Paths.RepoDir, "multiarch", "aarch64"): true,
+	}
+	for r := range want {
+		if !roots[r] {
+			t.Errorf("missing content root %q, got %v", r, roots)
+		}
+	}
+}

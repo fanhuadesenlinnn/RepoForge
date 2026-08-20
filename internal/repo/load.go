@@ -334,9 +334,21 @@ func (e *Expanded) ContentRoot(cfg *Config) string {
 }
 
 func multiValuedKeys(cfg *Config, r *Repository) []string {
-	vars := mergeVars(cfg.Vars, r.Upstream.Vars)
+	sources := r.Upstream.Sources
+	if len(sources) == 0 {
+		sources = []Source{{URL: r.Upstream.URL, Vars: r.Upstream.Vars}}
+	}
+	// Use the same variable set Expand iterates (upstream + sources vars), and
+	// only variables actually referenced by a source URL. This keeps layout
+	// in sync with variant expansion: a multi-arch repo whose basearch is
+	// declared in sources vars gets one subdirectory per architecture instead
+	// of all variants overwriting each other in the same directory.
+	vars := mergeVars(cfg.Vars, allVars(r))
 	var keys []string
 	for k, vs := range vars {
+		if !anySourceContains(sources, "$"+k) {
+			continue
+		}
 		vals := filterVals(vs)
 		if len(vals) > 1 {
 			keys = append(keys, k)

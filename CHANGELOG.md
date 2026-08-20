@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## v1.1.3
+
+- 修复：多架构仓库的 `basearch` 声明在 `sources.vars` 时（如麒麟源双源配置），各架构 variant 不再写入同一目录互相覆盖 repodata——按架构生成独立子目录（`<repo>/x86_64/`、`<repo>/aarch64/`），各自含完整 repodata。
+
 ## v1.1.2
 
 - 修复：多架构仓库（`$basearch` 展开为 x86_64 + aarch64 等）依赖求解时架构过滤错误——aarch64 variant 会被按 x86_64 过滤导致选 0 包、报“无法满足依赖”。`archList` 现在从展开变体的 `$basearch` 推断架构。

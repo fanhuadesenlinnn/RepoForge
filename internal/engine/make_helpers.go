@@ -21,16 +21,16 @@ import (
 // architecture does not match this variant, and the skipped arch breakdown.
 // A single directory may mix architectures (e.g. x86_64 + noarch); different
 // directories may target different architectures. noarch/all always match.
-func collectAndCopyInput(ctx context.Context, r *repo.Repository, root string, archs []string, home string) (names []string, copied, skipped int, skippedByArch map[string]int, err error) {
+func collectAndCopyInput(ctx context.Context, r *repo.Repository, root string, archs []string, home string) (names []string, localCopies map[string]string, copied, skipped int, skippedByArch map[string]int, err error) {
 	if err := os.MkdirAll(root, 0o755); err != nil {
-		return nil, 0, 0, nil, err
+		return nil, nil, 0, 0, nil, err
 	}
 	var files []string
 	for _, dir := range r.Input.PackageDirs {
 		resolved := resolveInputDir(dir, home)
 		f, err := scanPackageFiles(resolved, r.Backend, r.Input.Recursive)
 		if err != nil {
-			return nil, 0, 0, nil, err
+			return nil, nil, 0, 0, nil, err
 		}
 		progress.Infof(ctx, "[输入] 目录 %s：找到 %d 个 %s 文件", dir, len(f), r.Backend)
 		files = append(files, f...)
@@ -38,6 +38,7 @@ func collectAndCopyInput(ctx context.Context, r *repo.Repository, root string, a
 	sort.Strings(files)
 
 	namesMap := map[string]bool{}
+	localCopies = map[string]string{} // package name -> flat file name in root
 	skippedByArch = map[string]int{}
 	for _, src := range files {
 		fileArch := pkgArchFromFile(src, r.Backend)
@@ -49,10 +50,11 @@ func collectAndCopyInput(ctx context.Context, r *repo.Repository, root string, a
 		name := pkgNameFromFile(src, r.Backend)
 		if name != "" {
 			namesMap[name] = true
+			localCopies[name] = filepath.Base(src)
 		}
 		dst := filepath.Join(root, filepath.Base(src))
 		if err := copyFileIfNeeded(src, dst); err != nil {
-			return nil, 0, 0, nil, err
+			return nil, nil, 0, 0, nil, err
 		}
 		copied++
 	}
@@ -71,7 +73,7 @@ func collectAndCopyInput(ctx context.Context, r *repo.Repository, root string, a
 		sort.Strings(parts)
 		progress.Infof(ctx, "[输入] 跳过 %d 个架构不匹配的包（%s）", skipped, strings.Join(parts, ", "))
 	}
-	return out, copied, skipped, skippedByArch, nil
+	return out, localCopies, copied, skipped, skippedByArch, nil
 }
 
 // resolveInputDir resolves a package_dirs entry. Relative paths are first
@@ -94,25 +96,30 @@ func resolveInputDir(dir, home string) string {
 // pkgArchFromFile extracts the package architecture from a file name.
 // RPM: name-version-release.arch.rpm (arch is the last dot segment)
 // DEB: name_version_arch.deb        (arch is the last underscore segment)
+// Returns "" when the name has no arch segment (unusual / test fixtures).
 func pkgArchFromFile(file, backend string) string {
 	base := filepath.Base(file)
 	if backend == "rpm" {
 		s := strings.TrimSuffix(base, ".rpm")
-		if i := strings.LastIndex(s, "."); i >= 0 {
+		if i := strings.LastIndex(s, "."); i >= 0 && i < len(s)-1 {
 			return s[i+1:]
 		}
-		return s
+		return ""
 	}
 	s := strings.TrimSuffix(base, ".deb")
-	if i := strings.LastIndex(s, "_"); i >= 0 {
+	if i := strings.LastIndex(s, "_"); i >= 0 && i < len(s)-1 {
 		return s[i+1:]
 	}
-	return s
+	return ""
 }
 
 // archMatch reports whether a local package file's architecture belongs to the
-// variant's architecture set. noarch (rpm) and all (deb) always match.
+// variant's architecture set. noarch (rpm) and all (deb) always match; a file
+// whose architecture cannot be parsed is not rejected.
 func archMatch(fileArch string, archs []string, backend string) bool {
+	if fileArch == "" {
+		return true
+	}
 	if len(archs) == 0 {
 		return true
 	}

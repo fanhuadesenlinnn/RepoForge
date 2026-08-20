@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/fanhuadesenlinnn/RepoForge/internal/repo"
@@ -164,7 +165,7 @@ func TestCollectAndCopyInputArchFilter(t *testing.T) {
 	ctx := context.Background()
 
 	// x86_64 variant: copies x86_64 + noarch, skips aarch64.
-	names, copied, skipped, byArch, err := collectAndCopyInput(ctx, r, root, []string{"x86_64", "noarch"}, home)
+	names, _, copied, skipped, byArch, err := collectAndCopyInput(ctx, r, root, []string{"x86_64", "noarch"}, home)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -194,7 +195,7 @@ func TestCollectAndCopyInputArchFilter(t *testing.T) {
 
 	// aarch64 variant: copies aarch64 + noarch, skips x86_64.
 	root2 := filepath.Join(home, "out2")
-	_, copied2, skipped2, byArch2, err := collectAndCopyInput(ctx, r, root2, []string{"aarch64", "noarch"}, home)
+	_, _, copied2, skipped2, byArch2, err := collectAndCopyInput(ctx, r, root2, []string{"aarch64", "noarch"}, home)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -219,5 +220,87 @@ func TestPkgArchFromFile(t *testing.T) {
 		if got := pkgArchFromFile(c.file, c.backend); got != c.want {
 			t.Errorf("pkgArchFromFile(%q, %s) = %q, want %q", c.file, c.backend, got, c.want)
 		}
+	}
+}
+
+// A local package_dirs copy with the same NEVRA as an upstream package must be
+// adopted at the upstream Location (no duplicate download, no flat leftover),
+// and its dependencies still get fetched.
+func TestMakeLocalCopySameVersionAdopted(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(rpmHandler))
+	defer srv.Close()
+	home := t.TempDir()
+
+	inDir := filepath.Join(home, "local")
+	os.MkdirAll(inDir, 0o755)
+	os.WriteFile(filepath.Join(inDir, "vim.rpm"), []byte("local-vim-content"), 0o644)
+
+	content := "schema_version: 2\npaths:\n  repo_dir: " + home + "/repos\n" +
+		"repositories:\n  - name: x\n    backend: rpm\n    upstream:\n      url: " + srv.URL + "\n" +
+		"    input:\n      package_dirs: [" + inDir + "]\n"
+	cfg := loadConfigForMake(t, home, content)
+	r := &cfg.Repositories[0]
+	variants, _ := repo.Expand(cfg, r)
+	res, err := Make(context.Background(), cfg, &variants[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := variants[0].ContentRoot(cfg)
+
+	data, err := os.ReadFile(filepath.Join(root, "Packages/v/vim.rpm"))
+	if err != nil {
+		t.Fatalf("vim not adopted at upstream location: %v", err)
+	}
+	if string(data) != "local-vim-content" {
+		t.Fatalf("vim content = %q, want the local copy", data)
+	}
+	if _, err := os.Stat(filepath.Join(root, "vim.rpm")); err == nil {
+		t.Error("flat duplicate vim.rpm must not remain")
+	}
+	if res.Downloaded != 2 { // only vim's deps: glibc + glibc-common
+		t.Fatalf("downloaded = %d, want 2 (deps only, vim from local)", res.Downloaded)
+	}
+	// repodata must reference the adopted local vim.
+	if !strings.Contains(readGeneratedPrimary(t, root), "vim.rpm") {
+		t.Error("repodata does not list vim.rpm")
+	}
+}
+
+// A local copy whose version differs from upstream is discarded and the
+// upstream version fetched instead, so disk layout and repodata stay consistent.
+func TestMakeLocalCopyVersionMismatchUsesUpstream(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(rpmHandler))
+	defer srv.Close()
+	home := t.TempDir()
+
+	inDir := filepath.Join(home, "local")
+	os.MkdirAll(inDir, 0o755)
+	// Different file name (different NEVRA) than upstream vim.rpm.
+	os.WriteFile(filepath.Join(inDir, "vim-9.0-1.ky10.x86_64.rpm"), []byte("local-vim-content"), 0o644)
+
+	content := "schema_version: 2\npaths:\n  repo_dir: " + home + "/repos\n" +
+		"repositories:\n  - name: x\n    backend: rpm\n    upstream:\n      url: " + srv.URL + "\n" +
+		"    input:\n      package_dirs: [" + inDir + "]\n"
+	cfg := loadConfigForMake(t, home, content)
+	r := &cfg.Repositories[0]
+	variants, _ := repo.Expand(cfg, r)
+	res, err := Make(context.Background(), cfg, &variants[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := variants[0].ContentRoot(cfg)
+
+	data, err := os.ReadFile(filepath.Join(root, "Packages/v/vim.rpm"))
+	if err != nil {
+		t.Fatalf("upstream vim missing: %v", err)
+	}
+	if string(data) != "vim-content" {
+		t.Fatalf("vim content = %q, want the upstream copy", data)
+	}
+	if _, err := os.Stat(filepath.Join(root, "vim-9.0-1.ky10.x86_64.rpm")); err == nil {
+		t.Error("discarded local copy must not remain")
+	}
+	if res.Downloaded != 3 { // vim + glibc + glibc-common
+		t.Fatalf("downloaded = %d, want 3", res.Downloaded)
 	}
 }

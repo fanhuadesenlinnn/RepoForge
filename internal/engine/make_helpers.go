@@ -46,6 +46,15 @@ func collectAndCopyInput(r *repo.Repository, root string) ([]string, int, error)
 	return out, copied, nil
 }
 
+// splitPathList splits a possibly colon-separated path list (Unix PATH style),
+// preserving Windows drive letters (e.g. C:\pkgs stays a single entry).
+func splitPathList(s string) []string {
+	if filepath.VolumeName(s) != "" {
+		return []string{s}
+	}
+	return strings.Split(s, ":")
+}
+
 func scanPackageFiles(dir, backend string, recursive bool) ([]string, error) {
 	var suffix string
 	if backend == "rpm" {
@@ -76,7 +85,7 @@ func scanPackageFiles(dir, backend string, recursive bool) ([]string, error) {
 		}
 		return nil
 	}
-	for _, d := range strings.Split(dir, ":") {
+	for _, d := range splitPathList(dir) {
 		if d == "" {
 			continue
 		}

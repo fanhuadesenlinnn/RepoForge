@@ -181,7 +181,13 @@ func applyDefaults(home string, cfg *Config) {
 }
 
 func expandHome(home, value string) string {
-	return strings.ReplaceAll(value, "${home}", home)
+	const marker = "${home}"
+	// A value starting with ${home} is a local path: join with the platform
+	// separator so Windows does not end up with mixed \ and / (C:\...\home/repos).
+	if strings.HasPrefix(value, marker) {
+		return filepath.Join(home, strings.TrimPrefix(value, marker))
+	}
+	return strings.ReplaceAll(value, marker, home)
 }
 
 func validate(cfg *Config) error {

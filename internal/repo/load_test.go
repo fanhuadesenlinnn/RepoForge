@@ -3,6 +3,7 @@ package repo
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -139,8 +140,9 @@ repositories:
 	}
 	r := &cfg.Repositories[0]
 	variants, _ := Expand(cfg, r)
-	if got := variants[0].ContentRoot(cfg); !filepath.HasPrefix(got, "/data/special") {
-		t.Fatalf("ContentRoot = %q, want under /data/special", got)
+	wantBase := filepath.FromSlash("/data/special")
+	if got := variants[0].ContentRoot(cfg); !strings.HasPrefix(filepath.Clean(got), wantBase) {
+		t.Fatalf("ContentRoot = %q, want under %s", got, wantBase)
 	}
 }
 

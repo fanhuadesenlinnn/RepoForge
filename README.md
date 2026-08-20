@@ -43,14 +43,14 @@ RepoForge 是一个**跨平台（Windows / Linux / macOS）**的离线 Linux 软
 
 | 系统 | 架构 | 格式 | 示例文件 |
 | --- | --- | --- | --- |
-| Linux | amd64 / arm64 | tar.gz | `repoforge_v1.0.0_linux_amd64.tar.gz` |
-| macOS | amd64 / arm64 (Apple Silicon) | tar.gz | `repoforge_v1.0.0_darwin_arm64.tar.gz` |
-| Windows | amd64 / arm64 | zip | `repoforge_v1.0.0_windows_amd64.zip` |
+| Linux | amd64 / arm64 | tar.gz | `repoforge_v1.4.0_linux_amd64.tar.gz` |
+| macOS | amd64 / arm64 (Apple Silicon) | tar.gz | `repoforge_v1.4.0_darwin_arm64.tar.gz` |
+| Windows | amd64 / arm64 | zip | `repoforge_v1.4.0_windows_amd64.zip` |
 
 **Linux / macOS**：
 
 ```bash
-sudo tar -C /opt -xzf repoforge_v1.0.0_linux_amd64.tar.gz
+sudo tar -C /opt -xzf repoforge_v1.4.0_linux_amd64.tar.gz
 export PATH="/opt/repoforge/bin:$PATH"
 repoforge init
 ```
@@ -58,7 +58,7 @@ repoforge init
 **Windows**（解压 zip 后，把 `bin` 目录加入 PATH）：
 
 ```powershell
-Expand-Archive repoforge_v1.0.0_windows_amd64.zip -DestinationPath C:\repoforge
+Expand-Archive repoforge_v1.4.0_windows_amd64.zip -DestinationPath C:\repoforge
 $env:Path += ";C:\repoforge\repoforge\bin"
 repoforge init
 ```

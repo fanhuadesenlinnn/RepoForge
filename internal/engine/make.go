@@ -42,7 +42,7 @@ func Make(ctx context.Context, cfg *repo.Config, ev *repo.Expanded) (*MakeResult
 		return nil, err
 	}
 	// Load the aggregated index across all aggregate sources.
-	ix, err := loadIndex(ctx, ev, true)
+	ix, err := loadIndex(ctx, cfg, ev, true)
 	if err != nil {
 		return nil, err
 	}
@@ -54,31 +54,40 @@ func Make(ctx context.Context, cfg *repo.Config, ev *repo.Expanded) (*MakeResult
 	copied := 0
 	skippedLocal := 0
 	var localPkgs []upstream.Pkg
+	var softRequests []string
 	var baseRequests []string // union of input.packages + upgrade names
 	baseRequests = append(baseRequests, r.Input.Packages...)
 
 	if len(r.Input.PackageDirs) > 0 {
-		pkgs, n, skipped, _, err := collectLocalPkgs(ctx, r, root, archList(r, ev.Vars), cfg.Paths.HomeDir)
+		pkgs, allNames, n, skipped, _, err := collectLocalPkgs(ctx, r, root, archList(r, ev.Vars), cfg.Paths.HomeDir)
 		if err != nil {
 			return nil, err
 		}
 		copied += n
 		skippedLocal += skipped
 		localPkgs = append(localPkgs, pkgs...)
+		// Cross-arch complement: package_dirs may only carry one architecture;
+		// request the same names on every variant so variants without a local
+		// copy fetch the matching package from upstream. Soft: a third-party
+		// package with no upstream counterpart becomes a notice, not an error.
+		baseRequests = append(baseRequests, allNames...)
+		softRequests = append(softRequests, allNames...)
 	}
 
 	opt := SolveOptions{
-		Backend:   r.Backend,
-		Archs:     archList(r, ev.Vars),
-		WeakDeps:  r.Dependency.WeakDeps,
-		LocalPkgs: localPkgs,
+		Backend:      r.Backend,
+		Archs:        archList(r, ev.Vars),
+		WeakDeps:     r.Dependency.WeakDeps,
+		LocalPkgs:    localPkgs,
+		SoftRequests: softRequests,
 	}
 
 	// 2) upgrade_packages: add each name to the solve request so the latest
 	// version AND its dependencies are resolved together (Solver picks newest).
 	var notices []string
+	idx := buildSolveIndex(ix)
 	for _, name := range r.Input.UpgradePackages {
-		if _, err := latestVersion(ix, name, opt); err != nil {
+		if _, err := latestVersion(idx, name, opt); err != nil {
 			notices = append(notices, err.Error())
 			continue
 		}

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -58,7 +59,7 @@ func TestRPMIndex(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	ix, err := RPMIndex(context.Background(), srv.URL)
+	ix, err := RPMIndex(context.Background(), srv.URL, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -208,7 +209,7 @@ func TestRPMIndexMergesFilelists(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	ix, err := RPMIndexForSolve(context.Background(), srv.URL)
+	ix, err := RPMIndexForSolve(context.Background(), srv.URL, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -239,5 +240,64 @@ func TestFilelistsParsing(t *testing.T) {
 	}
 	if fl[0] != "/usr/bin/vim" {
 		t.Fatalf("file[0] = %q", fl[0])
+	}
+}
+
+// RPM metadata cache: after the first fetch, primary/filelists are served from
+// the cache keyed by their repomd checksum; the server sees no second request.
+func TestRPMIndexMetadataCache(t *testing.T) {
+	var mu sync.Mutex
+	primaryHits := 0
+	filelistHits := 0
+
+	flXML := `<filelists packages="1">
+  <package pkgid="AAAA" name="vim-enhanced" arch="x86_64">
+    <version epoch="0" ver="8.2" rel="1.el9"/>
+    <file>/usr/bin/vim</file>
+  </package>
+</filelists>`
+	var flbuf bytes.Buffer
+	fw := gzip.NewWriter(&flbuf)
+	fw.Write([]byte(flXML))
+	fw.Close()
+	flgz := flbuf.Bytes()
+
+	repomd := `<?xml version="1.0"?>
+<repomd>
+  <revision>123</revision>
+  <data type="primary"><checksum type="sha256">AAAAPRIMARY</checksum><location href="repodata/abc-primary.xml.gz"/></data>
+  <data type="filelists"><checksum type="sha256">AAAAFILELIST</checksum><location href="repodata/abc-filelists.xml.gz"/></data>
+</repomd>`
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		switch {
+		case strings.HasSuffix(r.URL.Path, "repomd.xml"):
+			w.Write([]byte(repomd))
+		case strings.HasSuffix(r.URL.Path, "primary.xml.gz"):
+			primaryHits++
+			w.Write(rpmPrimary())
+		case strings.HasSuffix(r.URL.Path, "filelists.xml.gz"):
+			filelistHits++
+			w.Write(flgz)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	cacheDir := t.TempDir()
+	if _, err := RPMIndexForSolve(context.Background(), srv.URL, cacheDir); err != nil {
+		t.Fatal(err)
+	}
+	if primaryHits != 1 || filelistHits != 1 {
+		t.Fatalf("first run hits primary=%d filelists=%d, want 1/1", primaryHits, filelistHits)
+	}
+	if _, err := RPMIndexForSolve(context.Background(), srv.URL, cacheDir); err != nil {
+		t.Fatal(err)
+	}
+	if primaryHits != 1 || filelistHits != 1 {
+		t.Fatalf("second run hits primary=%d filelists=%d, want unchanged 1/1", primaryHits, filelistHits)
 	}
 }

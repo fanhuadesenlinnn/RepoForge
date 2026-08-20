@@ -209,3 +209,22 @@ func TestSolveLocalPkgsWin(t *testing.T) {
 	}
 	_ = notices
 }
+
+// Cross-arch complement: a variant without a local copy requests the name from
+// upstream and gets the matching architecture (not the local-only one).
+func TestSolveCrossArchComplementFromUpstream(t *testing.T) {
+	ix := &upstream.Index{Packages: []upstream.Pkg{
+		{Name: "vim", Version: "8.2", Release: "1", Arch: "x86_64", Location: "P/vim.x86.rpm"},
+		{Name: "vim", Version: "8.2", Release: "1", Arch: "aarch64", Location: "P/vim.arm.rpm"},
+	}}
+	selected, problems, _ := Solve(ix, []string{"vim"}, SolveOptions{
+		Backend: "rpm", Archs: []string{"aarch64", "noarch"}, SoftRequests: []string{"vim"},
+	})
+	if len(problems) != 0 {
+		t.Fatalf("problems: %v", problems)
+	}
+	vim, ok := selected["vim"]
+	if !ok || vim.Arch != "aarch64" || vim.Location != "P/vim.arm.rpm" {
+		t.Fatalf("vim = %+v, want upstream aarch64 copy", vim)
+	}
+}

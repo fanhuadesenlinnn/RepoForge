@@ -32,7 +32,7 @@ func Sync(ctx context.Context, cfg *repo.Config, ev *repo.Expanded) (*SyncResult
 		return nil, err
 	}
 	// Load the aggregated index across all aggregate sources.
-	ix, err := loadIndex(ctx, ev, false)
+	ix, err := loadIndex(ctx, cfg, ev, false)
 	if err != nil {
 		return nil, err
 	}

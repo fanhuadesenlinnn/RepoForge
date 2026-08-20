@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## v1.3.0
+
+- 新增：跨架构补全——`input.package_dirs` 只含一种架构时，其他架构自动从上游拉取同名包 + 依赖（`input.packages`/`upgrade_packages` 同样支持）；上游没有对应架构版本的第三方包降级为提示，不再报错。
+- 性能：依赖求解索引化（provides 完整字符串哈希，yum 式）——大源（2 万+ 包）依赖树求解从卡死/数分钟降至秒级。
+- 新增：元数据缓存（yum/apt 式）——primary/filelists 按 repomd sha256 缓存原始文件 + 解析结果（gob），二次运行跳过下载与 XML 解析，元数据阶段从 1-2 分钟降至几秒。
+
 ## v1.2.0
 
 - 新增：`input.package_dirs` 本地包完整发布——解析本地 rpm/deb 文件自身元数据（名称/版本/架构/依赖），本地包直接进依赖求解并写入 repodata，其缺失依赖自动从上游下载。第三方/内网包不再只是“复制文件”，客户端 yum/apt 可直接安装。

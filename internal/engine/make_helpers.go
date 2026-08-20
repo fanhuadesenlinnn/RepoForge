@@ -19,25 +19,31 @@ import (
 // version, dependencies), copies matching files into root/Packages/, and
 // returns the parsed package entries. Local packages are published into the
 // repo as-is and their dependencies are resolved like any other package.
-func collectLocalPkgs(ctx context.Context, r *repo.Repository, root string, archs []string, home string) (localPkgs []upstream.Pkg, copied, skipped int, skippedByArch map[string]int, err error) {
+func collectLocalPkgs(ctx context.Context, r *repo.Repository, root string, archs []string, home string) (localPkgs []upstream.Pkg, allNames []string, copied, skipped int, skippedByArch map[string]int, err error) {
 	pkgDir := filepath.Join(root, "Packages")
 	if err := os.MkdirAll(pkgDir, 0o755); err != nil {
-		return nil, 0, 0, nil, err
+		return nil, nil, 0, 0, nil, err
 	}
 	var files []string
 	for _, dir := range r.Input.PackageDirs {
 		resolved := resolveInputDir(dir, home)
 		f, err := scanPackageFiles(resolved, r.Backend, r.Input.Recursive)
 		if err != nil {
-			return nil, 0, 0, nil, err
+			return nil, nil, 0, 0, nil, err
 		}
 		progress.Infof(ctx, "[输入] 目录 %s：找到 %d 个 %s 文件", dir, len(f), r.Backend)
 		files = append(files, f...)
 	}
 	sort.Strings(files)
 
+	seenNames := map[string]bool{}
 	skippedByArch = map[string]int{}
 	for _, src := range files {
+		name := pkgNameFromFile(src, r.Backend)
+		if name != "" && !seenNames[name] {
+			seenNames[name] = true
+			allNames = append(allNames, name)
+		}
 		fileArch := pkgArchFromFile(src, r.Backend)
 		if !archMatch(fileArch, archs, r.Backend) {
 			skipped++
@@ -47,11 +53,11 @@ func collectLocalPkgs(ctx context.Context, r *repo.Repository, root string, arch
 		base := filepath.Base(src)
 		pkg, err := upstream.ParseLocalPackage(src, "Packages/"+base, r.Backend)
 		if err != nil {
-			return nil, 0, 0, nil, err
+			return nil, nil, 0, 0, nil, err
 		}
 		dst := filepath.Join(pkgDir, base)
 		if err := copyFileIfNeeded(src, dst); err != nil {
-			return nil, 0, 0, nil, err
+			return nil, nil, 0, 0, nil, err
 		}
 		localPkgs = append(localPkgs, *pkg)
 		copied++
@@ -67,7 +73,7 @@ func collectLocalPkgs(ctx context.Context, r *repo.Repository, root string, arch
 		sort.Strings(parts)
 		progress.Infof(ctx, "[输入] 跳过 %d 个架构不匹配的包（%s）", skipped, strings.Join(parts, ", "))
 	}
-	return localPkgs, copied, skipped, skippedByArch, nil
+	return localPkgs, allNames, copied, skipped, skippedByArch, nil
 }
 
 // resolveInputDir resolves a package_dirs entry. Relative paths are first
@@ -229,8 +235,8 @@ func copyFileIfNeeded(src, dst string) error {
 }
 
 // latestVersion returns the newest package in the index matching name.
-func latestVersion(ix *upstream.Index, name string, opt SolveOptions) (upstream.Pkg, error) {
-	cands := providers(ix, name, func(p upstream.Pkg) bool {
+func latestVersion(idx *solveIndex, name string, opt SolveOptions) (upstream.Pkg, error) {
+	cands := idx.providers(name, func(p upstream.Pkg) bool {
 		return archOKFor(p, opt.Archs, opt.Backend)
 	})
 	if len(cands) == 0 {

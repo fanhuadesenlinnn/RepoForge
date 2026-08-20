@@ -21,6 +21,12 @@ type SolveOptions struct {
 	// any upstream version), their dependencies are resolved, and they are
 	// published into the repo. Prefer LocalPkgs over PreProvided.
 	LocalPkgs []upstream.Pkg
+	// SoftRequests are package names that should be resolved if upstream has a
+	// matching version, but must not fail the build when it does not. Used for
+	// cross-arch complementing: package_dirs only carries one architecture, so
+	// the other variants request the same names from upstream, and a
+	// third-party package with no upstream counterpart becomes a notice.
+	SoftRequests []string
 }
 
 // Solve computes the set of package locations needed to satisfy the requested
@@ -29,8 +35,13 @@ type SolveOptions struct {
 // into hard problems and tolerated notices (soft/conditional/virtual deps that
 // a packaged mirror may legitimately not fully resolve).
 func Solve(ix *upstream.Index, request []string, opt SolveOptions) (map[string]upstream.Pkg, []string, []string) {
+	idx := buildSolveIndex(ix)
 	selected := map[string]upstream.Pkg{} // by provides-name -> package
 	addedLoc := map[string]bool{}
+	soft := map[string]bool{}
+	for _, n := range opt.SoftRequests {
+		soft[n] = true
+	}
 	var queue []upstream.DependencyEntry
 	var problems []string
 	var notices []string
@@ -60,7 +71,7 @@ func Solve(ix *upstream.Index, request []string, opt SolveOptions) (map[string]u
 	// Pre-provided (local) packages are already available; mark them satisfied
 	// and enqueue their dependencies for resolution.
 	for _, name := range opt.PreProvided {
-		pkgs := providers(ix, name, archOK)
+		pkgs := idx.providers(name, archOK)
 		if len(pkgs) == 0 {
 			notices = append(notices, fmt.Sprintf("本地已有包 %q 未在上游找到（仅复制自身，不补外部依赖）", name))
 			continue
@@ -106,10 +117,10 @@ func Solve(ix *upstream.Index, request []string, opt SolveOptions) (map[string]u
 		// repo has no filelists or the file was not listed.
 		if opt.Backend == "rpm" && strings.HasPrefix(dep.Name, "/") {
 			resolved := false
-			cands := providers(ix, dep.Name, archOK)
+			cands := idx.providers(dep.Name, archOK)
 			if len(cands) == 0 {
 				if owner, ok := fileProvider[dep.Name]; ok {
-					if p, ok2 := findByName(ix, owner, archOK); ok2 {
+					if p, ok2 := idx.findByName(owner, archOK); ok2 {
 						cands = []upstream.Pkg{p}
 					}
 				}
@@ -145,9 +156,16 @@ func Solve(ix *upstream.Index, request []string, opt SolveOptions) (map[string]u
 			// still try to find a better provider
 		}
 
-		candidates := providers(ix, dep.Name, archOK)
+		candidates := idx.providers(dep.Name, archOK)
 		best := chooseBest(candidates, dep, opt.Backend)
 		if best == nil {
+			// Cross-arch complement: the name came from package_dirs on another
+			// architecture; upstream has no counterpart, so it cannot be
+			// complemented — inform, do not fail the build.
+			if soft[dep.Name] {
+				notices = append(notices, fmt.Sprintf("本地包 %q 在上游无对应架构版本，未补全", dep.Name))
+				continue
+			}
 			if toleratedDep(dep, opt.Backend) {
 				notices = append(notices, fmt.Sprintf("未匹配(可忽略): %s", dep.String()))
 			} else {
@@ -259,31 +277,79 @@ func dedupe(s []string) []string {
 	return out
 }
 
-func providers(ix *upstream.Index, name string, archOK func(upstream.Pkg) bool) []upstream.Pkg {
+// solveIndex pre-indexes an upstream.Index the way yum/apt do: exact hashes
+// for package names, file paths, and full provides capability strings, so a
+// dependency lookup is O(matches) instead of scanning every package. The base
+// name index is only a fallback for version-marked soname requirements that
+// need a fuzzy match.
+type solveIndex struct {
+	byName     map[string][]upstream.Pkg
+	byFile     map[string][]upstream.Pkg
+	byProvides map[string][]upstream.Pkg // full provides string -> packages
+	byBase     map[string][]upstream.Pkg // rpmsplit base -> packages (fallback)
+}
+
+func buildSolveIndex(ix *upstream.Index) *solveIndex {
+	idx := &solveIndex{
+		byName:     make(map[string][]upstream.Pkg, len(ix.Packages)),
+		byFile:     map[string][]upstream.Pkg{},
+		byProvides: map[string][]upstream.Pkg{},
+		byBase:     map[string][]upstream.Pkg{},
+	}
+	for _, p := range ix.Packages {
+		idx.byName[p.Name] = append(idx.byName[p.Name], p)
+		for _, f := range p.Files {
+			idx.byFile[f] = append(idx.byFile[f], p)
+		}
+		for _, prov := range p.Provides {
+			idx.byProvides[prov] = append(idx.byProvides[prov], p)
+			base, _ := rpmsplit(prov)
+			if base != prov {
+				idx.byBase[base] = append(idx.byBase[base], p)
+			}
+		}
+	}
+	return idx
+}
+
+// providers returns packages matching name: by exact package name, by file
+// path (when name starts with "/"), by an exact provides capability, or by a
+// fuzzy base-name match for version-marked soname requirements.
+func (idx *solveIndex) providers(name string, archOK func(upstream.Pkg) bool) []upstream.Pkg {
 	isFile := strings.HasPrefix(name, "/")
 	var out []upstream.Pkg
-	for _, p := range ix.Packages {
-		if !archOK(p) {
-			continue
-		}
-		if p.Name == name {
-			out = append(out, p)
-			continue
-		}
-		// File-path requirement matched against the package's file list
-		// (from RPM filelists.xml), the same way YUM resolves it.
-		if isFile {
-			for _, f := range p.Files {
-				if f == name {
-					out = append(out, p)
-					break
-				}
+	if isFile {
+		for _, p := range idx.byFile[name] {
+			if archOK(p) {
+				out = append(out, p)
 			}
+		}
+		return out
+	}
+	for _, p := range idx.byName[name] {
+		if archOK(p) {
+			out = append(out, p)
+		}
+	}
+	for _, p := range idx.byProvides[name] {
+		if archOK(p) {
+			out = append(out, p)
+		}
+	}
+	// Fallback: version-marked requirement (e.g. libX11.so.6(GLIBC_2.28)) that
+	// does not appear verbatim in any provides; match by base and verify.
+	base, _ := rpmsplit(name)
+	if base == "" || base == name {
+		return out
+	}
+	for _, p := range idx.byBase[base] {
+		if !archOK(p) {
 			continue
 		}
 		for _, prov := range p.Provides {
 			if providesMatch(prov, name) {
 				out = append(out, p)
+				break
 			}
 		}
 	}
@@ -291,11 +357,11 @@ func providers(ix *upstream.Index, name string, archOK func(upstream.Pkg) bool) 
 }
 
 // findByName returns the best package with the given name, honoring arch filter.
-func findByName(ix *upstream.Index, name string, archOK func(upstream.Pkg) bool) (upstream.Pkg, bool) {
+func (idx *solveIndex) findByName(name string, archOK func(upstream.Pkg) bool) (upstream.Pkg, bool) {
 	var best *upstream.Pkg
-	for i := range ix.Packages {
-		p := &ix.Packages[i]
-		if p.Name != name || !archOK(*p) {
+	for i := range idx.byName[name] {
+		p := &idx.byName[name][i]
+		if !archOK(*p) {
 			continue
 		}
 		if best == nil || pkgNewer(*p, *best, "rpm") > 0 {

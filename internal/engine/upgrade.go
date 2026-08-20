@@ -26,7 +26,7 @@ func MakeUpgrade(ctx context.Context, cfg *repo.Config, ev *repo.Expanded, insta
 		return nil, fmt.Errorf("未探测到本机已安装软件包，make-upgrade 需要在目标发行版的 Linux 上运行")
 	}
 	progress.Infof(ctx, "[升级] 读取上游索引以对照 %d 个已安装包", len(installed))
-	ix, err := loadIndex(ctx, ev, true)
+	ix, err := loadIndex(ctx, cfg, ev, true)
 	if err != nil {
 		return nil, err
 	}
@@ -61,12 +61,13 @@ func MakeUpgrade(ctx context.Context, cfg *repo.Config, ev *repo.Expanded, insta
 }
 
 func upgradesFromInstalled(ix *upstream.Index, installed []InstalledPkg, opt SolveOptions) (names []string, notices []string) {
+	idx := buildSolveIndex(ix)
 	seen := map[string]bool{}
 	for _, inst := range installed {
 		if inst.Name == "" || seen[inst.Name] {
 			continue
 		}
-		latest, err := latestVersion(ix, inst.Name, opt)
+		latest, err := latestVersion(idx, inst.Name, opt)
 		if err != nil {
 			continue
 		}

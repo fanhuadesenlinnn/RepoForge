@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"encoding/gob"
 	"encoding/xml"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/fanhuadesenlinnn/RepoForge/internal/progress"
@@ -14,18 +17,20 @@ import (
 
 // RPMIndex fetches and parses an RPM repository's metadata into a unified Index
 // (primary metadata only; no filelists). Use RPMIndexForSolve to also include
-// filelists for dependency resolution.
-func RPMIndex(ctx context.Context, baseURL string) (*Index, error) {
-	return rpmIndex(ctx, baseURL, false)
+// filelists for dependency resolution. cacheDir, when non-empty, caches the
+// downloaded primary/filelists files by their repomd checksum (yum/apt style),
+// so re-running against the same metadata skips the download.
+func RPMIndex(ctx context.Context, baseURL, cacheDir string) (*Index, error) {
+	return rpmIndex(ctx, baseURL, false, cacheDir)
 }
 
 // RPMIndexForSolve fetches primary plus filelists.xml (when present) so
 // file-path dependencies can be resolved. Used by the make/install solver.
-func RPMIndexForSolve(ctx context.Context, baseURL string) (*Index, error) {
-	return rpmIndex(ctx, baseURL, true)
+func RPMIndexForSolve(ctx context.Context, baseURL, cacheDir string) (*Index, error) {
+	return rpmIndex(ctx, baseURL, true, cacheDir)
 }
 
-func rpmIndex(ctx context.Context, baseURL string, withFilelists bool) (*Index, error) {
+func rpmIndex(ctx context.Context, baseURL string, withFilelists bool, cacheDir string) (*Index, error) {
 	base := strings.TrimRight(baseURL, "/")
 	repomdURL := base + "/repodata/repomd.xml"
 	progress.Infof(ctx, "[元数据] 读取 repomd.xml  %s", repomdURL)
@@ -50,16 +55,18 @@ func rpmIndex(ctx context.Context, baseURL string, withFilelists bool) (*Index, 
 	href := strings.TrimPrefix(primary.Location.Href, "/")
 	primaryURL := base + "/" + href
 	progress.Infof(ctx, "[元数据] 读取 primary.xml  %s", href)
-	raw, err := Fetch(ctx, primaryURL)
-	if err != nil {
-		return nil, fmt.Errorf("读取 %s: %w", primaryURL, err)
-	}
-	stream, err := openDecompressed(bytes.NewReader(raw), href)
-	if err != nil {
-		return nil, err
-	}
-	pkgs, err := parsePrimaryXMLReader(stream)
-	stream.Close()
+	pkgs, err := parseCached(ctx, cacheDir, primary.Checksum.Text, func() ([]Pkg, error) {
+		raw, err := fetchCached(ctx, primaryURL, cacheDir, primary.Checksum.Text, href)
+		if err != nil {
+			return nil, fmt.Errorf("读取 %s: %w", primaryURL, err)
+		}
+		stream, err := openDecompressed(bytes.NewReader(raw), href)
+		if err != nil {
+			return nil, err
+		}
+		defer stream.Close()
+		return parsePrimaryXMLReader(stream)
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -73,7 +80,7 @@ func rpmIndex(ctx context.Context, baseURL string, withFilelists bool) (*Index, 
 	if withFilelists {
 		if fh := findData(&rd, "filelists"); fh != "" {
 			progress.Infof(ctx, "[元数据] 读取 filelists.xml  %s", fh)
-			if fl := fetchFilelists(ctx, base, fh); len(fl) > 0 {
+			if fl := fetchFilelists(ctx, base, fh, cacheDir, filelistsChecksum(&rd)); len(fl) > 0 {
 				mergeFilelists(pkgs, fl)
 				progress.Infof(ctx, "[元数据] 已合并 filelists（%d 包含文件列表）", len(fl))
 			}
@@ -81,6 +88,16 @@ func rpmIndex(ctx context.Context, baseURL string, withFilelists bool) (*Index, 
 	}
 
 	return &Index{BaseURL: base, Backend: "rpm", Packages: pkgs}, nil
+}
+
+// filelistsChecksum returns the sha256 checksum of the filelists entry, or "".
+func filelistsChecksum(rd *repomd) string {
+	for i := range rd.Data {
+		if rd.Data[i].Type == "filelists" {
+			return rd.Data[i].Checksum.Text
+		}
+	}
+	return ""
 }
 
 // findData returns the href for a repomd data type ("" if absent).
@@ -94,20 +111,94 @@ func findData(rd *repomd, typ string) string {
 }
 
 // fetchFilelists downloads and stream-parses filelists.xml into a map keyed
-// by pkgid. Streaming avoids materializing the uncompressed XML (Kylin
-// filelists is ~10MB gzip / ~160MB raw) as a single buffer + DOM tree.
-func fetchFilelists(ctx context.Context, base, href string) map[string][]string {
+// by pkgid, caching the parsed map as gob. Streaming avoids materializing the
+// uncompressed XML (Kylin filelists is ~10MB gzip / ~160MB raw) as a single
+// buffer + DOM tree.
+func fetchFilelists(ctx context.Context, base, href, cacheDir, checksum string) map[string][]string {
 	url := base + "/" + href
+	fl, _ := parseCached(ctx, cacheDir, checksum+"-fl", func() (map[string][]string, error) {
+		raw, err := fetchCached(ctx, url, cacheDir, checksum, href)
+		if err != nil {
+			return nil, err
+		}
+		stream, err := openDecompressed(bytes.NewReader(raw), href)
+		if err != nil {
+			return nil, err
+		}
+		defer stream.Close()
+		return parseFilelistsXMLReader(stream), nil
+	})
+	return fl
+}
+
+// fetchCached downloads url and caches the raw bytes under cacheDir/metadata/
+// keyed by the repomd sha256 checksum (yum/apt style). A cache hit skips the
+// network entirely. Returns the raw (still compressed) file bytes.
+func fetchCached(ctx context.Context, url, cacheDir, checksum, name string) ([]byte, error) {
+	if cacheDir != "" && checksum != "" {
+		if raw, ok := readCacheFile(cacheDir, checksum); ok {
+			progress.Infof(ctx, "[元数据] 缓存命中 %s（跳过下载）", filepath.Base(name))
+			return raw, nil
+		}
+	}
 	raw, err := Fetch(ctx, url)
 	if err != nil {
-		return nil
+		return nil, err
 	}
-	stream, err := openDecompressed(bytes.NewReader(raw), href)
+	if cacheDir != "" && checksum != "" {
+		writeCacheFile(cacheDir, checksum, raw)
+	}
+	return raw, nil
+}
+
+// parseCached runs compute (which downloads + parses metadata) and caches its
+// parsed result as gob, keyed by the repomd checksum — the way yum's sqlite
+// cache and apt's pkgcache.bin store parsed metadata. Re-runs deserialize the
+// gob instead of re-downloading and re-parsing multi-hundred-MB XML.
+func parseCached[T any](ctx context.Context, cacheDir, checksum string, compute func() (T, error)) (T, error) {
+	if cacheDir != "" && checksum != "" {
+		if raw, ok := readCacheFile(cacheDir, checksum+".gob"); ok {
+			var v T
+			if err := gob.NewDecoder(bytes.NewReader(raw)).Decode(&v); err == nil {
+				return v, nil
+			}
+			// Corrupt or incompatible cache: fall through and recompute.
+		}
+	}
+	v, err := compute()
 	if err != nil {
-		return nil
+		return v, err
 	}
-	defer stream.Close()
-	return parseFilelistsXMLReader(stream)
+	if cacheDir != "" && checksum != "" {
+		var buf bytes.Buffer
+		if err := gob.NewEncoder(&buf).Encode(v); err == nil {
+			writeCacheFile(cacheDir, checksum+".gob", buf.Bytes())
+		}
+	}
+	return v, nil
+}
+
+func readCacheFile(cacheDir, checksum string) ([]byte, bool) {
+	path := filepath.Join(cacheDir, "metadata", checksum)
+	raw, err := os.ReadFile(path)
+	if err != nil || len(raw) == 0 {
+		return nil, false
+	}
+	return raw, true
+}
+
+// writeCacheFile stores the metadata atomically (tmp + rename) so a crash
+// mid-write never leaves a truncated cache entry.
+func writeCacheFile(cacheDir, checksum string, raw []byte) {
+	dir := filepath.Join(cacheDir, "metadata")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return
+	}
+	tmp := filepath.Join(dir, "."+checksum+".tmp")
+	if err := os.WriteFile(tmp, raw, 0o644); err != nil {
+		return
+	}
+	_ = os.Rename(tmp, filepath.Join(dir, checksum))
 }
 
 type repomd struct {
@@ -116,7 +207,12 @@ type repomd struct {
 }
 type dataLoc struct {
 	Type     string   `xml:"type,attr"`
+	Checksum chkSum   `xml:"checksum"`
 	Location location `xml:"location"`
+}
+type chkSum struct {
+	Type string `xml:"type,attr"`
+	Text string `xml:",chardata"`
 }
 type location struct {
 	Href string `xml:"href,attr"`

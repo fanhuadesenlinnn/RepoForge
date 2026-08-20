@@ -165,7 +165,7 @@ func TestCollectLocalPkgsArchFilter(t *testing.T) {
 
 	// x86_64 variant: both packages match, metadata is parsed.
 	root := filepath.Join(home, "out")
-	pkgs, copied, skipped, byArch, err := collectLocalPkgs(ctx, r, root, []string{"x86_64", "noarch"}, home)
+	pkgs, allNames, copied, skipped, byArch, err := collectLocalPkgs(ctx, r, root, []string{"x86_64", "noarch"}, home)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,6 +174,9 @@ func TestCollectLocalPkgsArchFilter(t *testing.T) {
 	}
 	if len(pkgs) != 2 {
 		t.Fatalf("localPkgs = %d, want 2", len(pkgs))
+	}
+	if len(allNames) != 1 || allNames[0] != "mylocal" {
+		t.Fatalf("allNames = %v, want single mylocal (deduped across arch)", allNames)
 	}
 	gotReq := map[string]bool{}
 	for _, p := range pkgs {
@@ -198,7 +201,7 @@ func TestCollectLocalPkgsArchFilter(t *testing.T) {
 
 	// aarch64 variant: noarch matches, x86_64 is skipped before parsing.
 	root2 := filepath.Join(home, "out2")
-	pkgs2, copied2, skipped2, byArch2, err := collectLocalPkgs(ctx, r, root2, []string{"aarch64", "noarch"}, home)
+	pkgs2, allNames2, copied2, skipped2, byArch2, err := collectLocalPkgs(ctx, r, root2, []string{"aarch64", "noarch"}, home)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,6 +210,11 @@ func TestCollectLocalPkgsArchFilter(t *testing.T) {
 	}
 	if len(pkgs2) != 1 || pkgs2[0].Arch != "noarch" {
 		t.Fatalf("aarch64 localPkgs = %+v, want single noarch", pkgs2)
+	}
+	// All names (including arch-mismatched ones) are reported for cross-arch
+	// complementing on other variants.
+	if len(allNames2) != 1 || allNames2[0] != "mylocal" {
+		t.Fatalf("aarch64 allNames = %v, want mylocal (incl. skipped x86_64 name)", allNames2)
 	}
 }
 
@@ -280,5 +288,59 @@ func TestMakeLocalThirdPartyPublishedWithDeps(t *testing.T) {
 	// No problem should remain (vim resolves fine).
 	if len(res.Problems) != 0 {
 		t.Fatalf("unexpected problems: %v", res.Problems)
+	}
+}
+
+// package_dirs only carries x86_64 packages while the repo has two variants
+// (x86_64 + aarch64): the aarch64 variant must not fail — names it cannot
+// complement from upstream become notices, not hard problems.
+func TestMakeCrossArchComplementMissingBecomesNotice(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(rpmHandler))
+	defer srv.Close()
+	home := t.TempDir()
+
+	inDir := filepath.Join(home, "local")
+	os.MkdirAll(inDir, 0o755)
+	copyTestdata(t, filepath.Join(inDir, "vim-8.2-1.x86_64.rpm"), "vim-8.2-1.x86_64.rpm")
+	copyTestdata(t, filepath.Join(inDir, "mylocal-1.0-1.x86_64.rpm"), "mylocal-1.0-1.x86_64.rpm") // Requires: vim
+
+	content := "schema_version: 2\npaths:\n  repo_dir: " + home + "/repos\n" +
+		"repositories:\n  - name: x\n    backend: rpm\n    upstream:\n" +
+		"      url: " + srv.URL + "/$basearch/\n      vars:\n        - name: basearch\n          values: [x86_64, aarch64]\n" +
+		"    input:\n      package_dirs: [" + inDir + "]\n"
+	cfg := loadConfigForMake(t, home, content)
+	r := &cfg.Repositories[0]
+	variants, _ := repo.Expand(cfg, r)
+	if len(variants) != 2 {
+		t.Fatalf("expected 2 variants, got %d", len(variants))
+	}
+	for _, ev := range variants {
+		res, err := Make(context.Background(), cfg, &ev)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(res.Problems) != 0 {
+			t.Fatalf("%s: unexpected problems: %v", ev.Vars["basearch"], res.Problems)
+		}
+		if ev.Vars["basearch"] == "x86_64" {
+			if res.Copied != 2 || res.Downloaded != 0 {
+				t.Fatalf("x86_64: copied=%d downloaded=%d, want 2/0 (local wins)", res.Copied, res.Downloaded)
+			}
+		} else {
+			// aarch64: nothing local, names can't be complemented (upstream
+			// only carries x86_64) → notices, no failure.
+			if res.Copied != 0 {
+				t.Fatalf("aarch64: copied=%d, want 0", res.Copied)
+			}
+			found := false
+			for _, n := range res.Notices {
+				if strings.Contains(n, "未补全") {
+					found = true
+				}
+			}
+			if !found {
+				t.Fatalf("aarch64: expected 未补全 notice, got %v", res.Notices)
+			}
+		}
 	}
 }
